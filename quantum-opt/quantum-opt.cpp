@@ -1,4 +1,4 @@
-/* Create a quant-opt program to roundtrip IR examples using the quant dialect */
+/* Create a quantum-opt program to roundtrip IR examples using the quant dialect */
 
 #include "mlir/IR/Dialect.h"
 #include "mlir/IR/MLIRContext.h"
@@ -13,7 +13,7 @@
 #include "llvm/Support/SourceMgr.h"
 #include "llvm/Support/ToolOutputFile.h"
 
-#include "QuantDialect.h"
+#include "QuantumDialect.h"
 
 static llvm::cl::opt<std::string> inputFilename(llvm::cl::Positional,
                                                 llvm::cl::desc("<input file>"),
@@ -54,8 +54,8 @@ int main(int argc, char **argv) {
   mlir::registerAllDialects();
   mlir::registerAllPasses();
 
-  mlir::registerDialect<mlir::quant::QuantDialect>();
-  // TODO: Register quant passes here.
+  mlir::registerDialect<mlir::quantum::QuantumDialect>();
+  // TODO: Register quantum passes here.
 
   llvm::InitLLVM y(argc, argv);
 

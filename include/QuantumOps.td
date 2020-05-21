@@ -1,12 +1,12 @@
-#ifndef QUANT_OPS
-#define QUANT_OPS
+#ifndef QUANTUM_OPS
+#define QUANTUM_OPS
 
-include "QuantDialect.td"
+include "QuantumDialect.td"
 
 // example traits
 include "mlir/Interfaces/SideEffects.td"
 
-def AllocOp : Quant_Op<"allocate", [NoSideEffect]> {
+def AllocOp : Quantum_Op<"allocate", [NoSideEffect]> {
     let summary = "This allocates a qubit.";
     let description = [{
         The allocation command register a new qubit with the system, which is guaranteed to
@@ -23,10 +23,10 @@ def AllocOp : Quant_Op<"allocate", [NoSideEffect]> {
         ```
     }];
 
-    let results = (outs Quant_QubitType:$qb);
+    let results = (outs Quantum_QubitType:$qb);
 }
 
-def HOp : Quant_Op<"H"> {
+def HOp : Quantum_Op<"H"> {
     let summary = "This is the Hadamard gate.";
     let description = [{
         The Hadamard gate is a single Qubit unitary.
@@ -47,7 +47,7 @@ def HOp : Quant_Op<"H"> {
         ```
     }];
 
-    let arguments = (ins Quant_QubitType:$qb);
+    let arguments = (ins Quantum_QubitType:$qb);
 
     // custom MLIR assembly format if desired
     /*
@@ -57,4 +57,4 @@ def HOp : Quant_Op<"H"> {
     */
 }
 
-#endif // QUANT_OPS
+#endif // QUANTUM_OPS

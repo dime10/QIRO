@@ -1,28 +1,28 @@
 /* Place additional code not defined by the ODS or RRD systems here,
    e.g. operations, custom types, attributes etc. */
 
-#include "QuantDialect.h"
+#include "QuantumDialect.h"
 
 #include "mlir/IR/DialectImplementation.h"
 //#include "mlir/IR/OpImplementation.h"
 //#include "mlir/IR/StandardTypes.h"
 
 using namespace mlir;
-using namespace mlir::quant;
+using namespace mlir::quantum;
 
 // Define the Dialect contructor. This is the point of registration of
 // all custom types, operations, attributes, etc. for the dialect.
-QuantDialect::QuantDialect(mlir::MLIRContext *ctx) : mlir::Dialect("quant", ctx) {
+QuantumDialect::QuantumDialect(mlir::MLIRContext *ctx) : mlir::Dialect("quantum", ctx) {
     // these templated methods are from the mlir::Dialect class
     addOperations<
         #define GET_OP_LIST
-        #include "QuantOps.cpp.inc"
+        #include "QuantumOps.cpp.inc"
     >();
     
-    addTypes<QubitType, QuregType>();  // in mlir::quant
+    addTypes<QubitType, QuregType>();  // in mlir::quantum
 
-    // addAttributes<QuantAttribute>();
-    // addInterfaces<QuantInterface>();
+    // addAttributes<QuantumAttribute>();
+    // addInterfaces<QuantumInterface>();
 }
 
 /* must override the printType and parseType methods for round-tripping */
@@ -38,22 +38,22 @@ public:
     using Base::Base;
 
     // This is used to support type inquiry through isa, cast, and dyn_cast.
-    static bool kindof(unsigned kind) { return kind == QuantTypes::Qubit; }
+    static bool kindof(unsigned kind) { return kind == QuantumTypes::Qubit; }
 
     // This is used to get an instance of the 'QubitType'. Given that this is
     // a parameterless type, it just needs the context for uniquing purposes.
     static QubitType get(mlir::MLIRContext *ctx) {
-        return Base::get(ctx, QuantTypes::Qubit);
+        return Base::get(ctx, QuantumTypes::Qubit);
     }
 };
 
 // This class represents a register of qubits, with a minimum of one qubit. For such a
 // parametrized type, we also need to the type with a custom storage class (QuregTypeStorage).
-class QuregType : public Type::TypeBase<QuregType, Type, quant::detail::QuregTypeStorage> {
+class QuregType : public Type::TypeBase<QuregType, Type, quantum::detail::QuregTypeStorage> {
 public:
     using Base::Base;
 
-    static bool kindof(unsigned kind) { return kind == QuantTypes::Qureg; }
+    static bool kindof(unsigned kind) { return kind == QuantumTypes::Qureg; }
 
     // This method is a bit different from the simple type above. It takes the parameters
     // required for uniquing which will be passed to the container (storage) class.
@@ -63,7 +63,7 @@ public:
         assert(!(size==0) && "Qureg size must be >= 1");
 
         // Parameters to the storage class are passed after the custom type kind.
-        return Base::get(ctx, QuantTypes::Qureg, size);
+        return Base::get(ctx, QuantumTypes::Qureg, size);
     }
 
     // Return the register size
@@ -73,8 +73,8 @@ public:
     }
 };
 
-// This class represents the internal storage of the Quant 'QuregType'.
-struct quant::detail::QuregTypeStorage : public mlir::TypeStorage {
+// This class represents the internal storage of the Quantum 'QuregType'.
+struct quantum::detail::QuregTypeStorage : public mlir::TypeStorage {
     // The `KeyTy` is a required type that provides an interface for the storage instance.
     // This type will be used when uniquing an instance of the type storage. For our Qureg
     // type, we will unique each instance on its size.
@@ -103,12 +103,12 @@ struct quant::detail::QuregTypeStorage : public mlir::TypeStorage {
 
 // Finally, to be able to read and output .mlir code (roundtrip) from this dialect
 // with our custom types, we need to overwrite the printType and parseType hooks.
-void QuantDialect::printType(mlir::Type type, mlir::DialectAsmPrinter &printer) const {
-    // Differentiate between the Quant types via their kinds and print accordingly.
-    if (type.getKind() == QuantTypes::Qubit) {
+void QuantumDialect::printType(mlir::Type type, mlir::DialectAsmPrinter &printer) const {
+    // Differentiate between the Quantum types via their kinds and print accordingly.
+    if (type.getKind() == QuantumTypes::Qubit) {
         printer << "qubit";
     }
-    else if (type.getKind() == QuantTypes::Qureg) {
+    else if (type.getKind() == QuantumTypes::Qureg) {
         QuregType type = type.cast<QuregType>();
         printer << "qureg[" << type.getNumQubits() << "]";
     }
@@ -117,8 +117,8 @@ void QuantDialect::printType(mlir::Type type, mlir::DialectAsmPrinter &printer) 
     }
 } 
 
-// Parse an instance of a type registered to the Quant dialect.
-mlir::Type QuantDialect::parseType(mlir::DialectAsmParser &parser) const {
+// Parse an instance of a type registered to the Quantum dialect.
+mlir::Type QuantumDialect::parseType(mlir::DialectAsmParser &parser) const {
     // NOTE: All MLIR parser function return a ParseResult. This is a
     // specialization of LogicalResult that auto-converts to a `true` boolean
     // value on failure to allow for chaining, but may be used with explicit

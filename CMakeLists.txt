@@ -43,4 +43,4 @@ add_definitions(${LLVM_DEFINITIONS})
 
 add_subdirectory(include)
 add_subdirectory(lib/IR)
-add_subdirectory(quant-opt)
+add_subdirectory(quantum-opt)

@@ -1,12 +1,12 @@
 # add library dependencies of the dialect
-add_mlir_dialect_library(MLIRQuant  # library name
-    QuantDialect.cpp                # file for operations directly implemented in C++
+add_mlir_dialect_library(MLIRQuantum  # library name
+    QuantumDialect.cpp                # file for operations directly implemented in C++
 
     ADDITIONAL_HEADER_DIRS          # specify where to find header files
     ${PROJECT_SOURCE_DIR}/include
 
     DEPENDS                         # keyword for libraries belonging to this dialect
-    MLIRQuantOpsIncGen              # (typically in the form of IncGen files)
+    MLIRQuantumOpsIncGen              # (typically in the form of IncGen files)
 
     LINK_LIBS PUBLIC                # libs from other dialects are declared using the PUBLIC keyword
     MLIRIR                          # LINK_LIBS is used to link to MLIR libraries
