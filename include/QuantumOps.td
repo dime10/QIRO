@@ -3,10 +3,7 @@
 
 include "QuantumDialect.td"
 
-// example traits
-include "mlir/Interfaces/SideEffects.td"
-
-def AllocOp : Quantum_Op<"allocate", [NoSideEffect]> {
+def AllocOp : Quantum_Op<"allocate"> {
     let summary = "This allocates a qubit.";
     let description = [{
         The allocation command register a new qubit with the system, which is guaranteed to
@@ -48,13 +45,6 @@ def HOp : Quantum_Op<"H"> {
     }];
 
     let arguments = (ins Quantum_QubitType:$qb);
-
-    // custom MLIR assembly format if desired
-    /*
-    let assemblyFormat = [{
-        $input attr-dict `:` type($input)
-    }];
-    */
 }
 
 #endif // QUANTUM_OPS

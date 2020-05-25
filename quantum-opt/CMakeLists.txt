@@ -4,9 +4,16 @@ set(LIBS
         ${dialect_libs}
         ${conversion_libs}
         MLIROptLib
+        MLIRStandalone
         MLIRQuantum
         )
 add_llvm_executable(quantum-opt quantum-opt.cpp)
 
 llvm_update_compile_flags(quantum-opt)
 target_link_libraries(quantum-opt PRIVATE ${LIBS})
+
+add_custom_command(TARGET quantum-opt POST_BUILD
+    COMMAND quantum-opt ../../test/test.mlir
+    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}/build/bin
+    COMMENT "Running quantum circuit check..."
+)
