@@ -62,7 +62,7 @@ struct QuregTypeStorage : public mlir::TypeStorage {
 /* QuregType method implementations after QuregTypeStorage has been defined */
 
 QuregType QuregType::get(mlir::MLIRContext *ctx, unsigned size) {
-    assert(!(size==0) && "Qureg size must be >= 1");
+    assert((size > 0) && "Qureg size must be > 0");
 
     // Parameters to the storage class are passed after the custom type kind.
     return Base::get(ctx, QuantumTypes::Qureg, size);
@@ -79,14 +79,16 @@ unsigned QuregType::getNumQubits() {
 // Print an instance of a type registered in the Quantum dialect.
 void QuantumDialect::printType(mlir::Type type, mlir::DialectAsmPrinter &printer) const {
     // Differentiate between the Quantum types via their kinds and print accordingly.
-    if (type.getKind() == QuantumTypes::Qubit) {
+    switch(type.getKind()) {
+    case QuantumTypes::Qubit:
         printer << "qubit";
+        break;
+    case QuantumTypes::Qureg: {
+        QuregType ctype = type.cast<QuregType>();
+        printer << "qureg<" << ctype.getNumQubits() << ">";
+        break;
     }
-    else if (type.getKind() == QuantumTypes::Qureg) {
-        QuregType type = type.cast<QuregType>();
-        printer << "qureg[" << type.getNumQubits() << "]";
-    }
-    else {
+    default:
         throw "unrecognized type encountered in the printer!";
     }
 } 
@@ -99,38 +101,28 @@ mlir::Type QuantumDialect::parseType(mlir::DialectAsmParser &parser) const {
     // `mlir::failed/mlir::succeeded` as desired.
 
     // Try to parse either the Qubit or Qureg type. On failure, exit this function.
-    if (parser.parseKeyword("qubit")) {
-        if (parser.parseKeyword("qureg")) {
-            return Type();
-        }
-
-        // parse the register size if successfully matched 'qureg'
-        llvm::SMLoc typeLoc = parser.getCurrentLocation();
-        if (parser.parseLSquare()) {
-            parser.emitError(typeLoc, "qureg type must have a size in square brackets,"
-                                      " e.g. qureg[5]");
-            return Type();
-        }
-
-        typeLoc = parser.getCurrentLocation();
+    StringRef keyword;
+    if (parser.parseKeyword(&keyword)) {
+        return Type();
+    }
+    if (keyword == "qubit")
+        return QubitType::get(this->getContext());
+    if (keyword == "qureg") {
         unsigned size;
+        if (parser.parseLess()) {
+            return nullptr;
+        }
         if (parser.parseInteger<unsigned>(size)) {
-            parser.emitError(typeLoc, "qureg type must have a size in square brackets,"
-                                      " e.g. qureg[5]");
-            return Type();
+            return nullptr;
         }
-        
-        typeLoc = parser.getCurrentLocation();
-        if (parser.parseRSquare()) {
-            parser.emitError(typeLoc, "qureg type must have a size in square brackets,"
-                                      " e.g. qureg[5]");
-            return Type();
+        if (parser.parseGreater()) {
+            return nullptr;
         }
-
         return QuregType::get(this->getContext(), size);
     }
 
-    return QubitType::get(this->getContext());
+    parser.emitError(parser.getNameLoc(), "unrecognized quantum type");
+    return Type();
 }
 
 #define GET_OP_CLASSES

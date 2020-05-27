@@ -13,5 +13,3 @@ add_mlir_dialect_library(MLIRQuantum  # library name
 
     #LINK_COMPONENTS                 # LINK_COMPONENTS is used to link to llvm libraries
 )
-
-add_subdirectory(Standalone)

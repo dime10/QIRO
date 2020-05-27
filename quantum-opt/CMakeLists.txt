@@ -4,7 +4,6 @@ set(LIBS
         ${dialect_libs}
         ${conversion_libs}
         MLIROptLib
-        MLIRStandalone
         MLIRQuantum
         )
 add_llvm_executable(quantum-opt quantum-opt.cpp)
