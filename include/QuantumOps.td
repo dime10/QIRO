@@ -175,10 +175,45 @@ def HOp : Quantum_Op<"H"> {
     let arguments = (ins Quantum_Type:$qbs,
                          Optional<Quantum_Type>:$ctrls);
 }
+
+def Barrier : Quantum_Op<"bar", [Terminator]> {
+    let summary = "This marks the end of a circuit.";
+    let description = [{
+        As a circuit is described by a block,
+        it needs to be terminated by an appropriate op.
+    }];
+}
+
+def Circuit : Quantum_Op<"circ"> {
+    let summary = "This is a basic quantum circuit.";
+    let description = [{
+        A basic quantum circuit is a simple block regrouping multiple gates.
+        These operations can then be repeated or controlled as as single unit.
+
+        The circuit input consists of an optional argument to specify a qubit
+        or register upon which the entire circuit should be controlled.
+        Additionally, an optional attribute specifies how many times the
+        circuit should be repeated (>= 2).
+        Note that the gates are grouped within a block, which must be terminated
+        with the special Barrier operation.
+
+        Example:
+
+        ```mlir
+        %ctrls = "q.allocreg"() {size=4} : () -> (!q.qureg<4>)
+        "q.circ"(%ctrls) ({
+        ^bb0:
+            %qbs = "q.allocreg"() {size=3} : () -> (!q.qureg<3>)
+            "q.H"(%qbs) : (!q.qureg<3>) -> ()
+            "q.bar"() : () -> ()
+        }) {repeat=6} : (!q.qureg<4>) -> ()
         ```
     }];
 
-    let arguments = (ins Quantum_Type:$qbs);
+    // todo: multiple optional arguments?
+    let arguments = (ins Optional<Quantum_Type>:$ctrls,
+                         OptionalAttr<Confined<APIntAttr, [IntMinValue<2>]>>:$repeat);
+    let regions = (region SizedRegion<1>:$gates);
 }
 
 #endif // QUANTUM_OPS
