@@ -57,8 +57,19 @@ def HOp : Quantum_Op<"H"> {
 
         ```mlir
         %0 = "q.alloc"() : () -> (!q.qubit)
-        // Apply the Hadamard gate to %0
+        %1 = "q.allocreg"() {size=4} : () -> (!q.qureg<4>)
+        // Apply a Hadamard gate to qubit %0
         "q.H"(%0) : (!q.qubit) -> ()
+        // Apply a Hadamard gate to each qubit in register %1
+        "q.H"(%1) : (!q.qureg<4>) -> ()
+        // Apply a Hadamard gate to each qubit in register %1 controlled upon the state of qubit %0
+        "q.H"(%1) {ctrls=%0} : (!q.qureg<4>) -> ()
+        ```
+    }];
+
+    let arguments = (ins Quantum_Type:$qbs,
+                         Optional<Quantum_Type>:$ctrls);
+}
         ```
     }];
 
