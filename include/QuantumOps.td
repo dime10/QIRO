@@ -2,6 +2,7 @@
 #define QUANTUM_OPS
 
 include "QuantumDialect.td"
+include "mlir/Interfaces/SideEffectInterfaces.td"
 
 def AllocOp : Quantum_Op<"alloc"> {
     let summary = "This allocates a qubit.";
@@ -37,7 +38,111 @@ def AllocRegOp : Quantum_Op<"allocreg"> {
         ```
     }];
 
-    let arguments = (ins APIntAttr:$size);
+    let arguments = (ins Confined<APIntAttr, [IntPositive]>:$size);
+    let results = (outs Quantum_QuregType:$reg);
+}
+
+def ExtrRegOp : Quantum_Op<"extract", [NoSideEffect]> {
+    let summary = "Extract single qubit from register.";
+    let description = [{
+        This op allows to get out individual qubits from a register.
+        The register is passed as an argument, and the index as an attribute.
+
+        Supports custom assembly.
+        Example:
+
+        ```mlir
+        %0 = "q.allocreg"() {size=4} : () -> (!q.qureg<4>)
+        %1 = "q.extract"(%0) {idx=2} : (!q.qureg<4>) -> (!q.qubit)
+        // OR in custom assembly format
+        %2 = q.extract %0[2] : !q.qureg<4> -> !q.qubit
+    }];
+
+    let arguments = (ins Quantum_QuregType:$reg,
+                         Confined<APIntAttr, [IntNonNegative]>:$idx);
+    let results = (outs Quantum_QubitType:$qb);
+
+    let verifier = [{
+        llvm::APInt idx = this->idx();
+        unsigned regsize = this->reg().getType().cast<QuregType>().getNumQubits();
+
+        if (idx.uge(regsize))
+            return this->emitError() << "index out of bounds, got "
+                                     << "idx=" << *(idx.getRawData())
+                                     << ", regsize=" << regsize;
+
+        return success();
+    }];
+
+    let assemblyFormat = [{
+        $reg `[` $idx `]` attr-dict `:` type($reg) `->` type($qb)
+    }];
+}
+
+def SliceRegOp : Quantum_Op<"slice", [NoSideEffect]> {
+    let summary = "Extract range of qubits from register.";
+    let description = [{
+        This op allows to extract a continous range of qubits from a register.
+        The register is passed as an argument, and the indeces as attributes.
+        Endpoint is included for left index but NOT the right index.
+
+        Supports custom assembly.
+        Example:
+
+        ```mlir
+        %0 = "q.allocreg"() {size=4} : () -> (!q.qureg<4>)
+        %1 = "q.extract"(%0) {a=1, b=4} : (!q.qureg<4>) -> (!q.qureg<3>)
+        // OR in custom assembly format
+        %2 = q.extract %0[1,4] : !q.qureg<4> -> !q.qureg<3>
+    }];
+
+    let arguments = (ins Quantum_QuregType:$reg,
+                         Confined<APIntAttr, [IntNonNegative]>:$a,
+                         Confined<APIntAttr, [IntNonNegative]>:$b);
+    let results = (outs Quantum_QuregType:$newreg);
+
+    let verifier = [{
+        llvm::APInt a = this->a();
+        llvm::APInt b = this->b();
+        unsigned regsize = this->reg().getType().cast<QuregType>().getNumQubits();
+        unsigned newregsize = this->newreg().getType().cast<QuregType>().getNumQubits();
+
+        if (a.uge(regsize) || b.ugt(regsize))
+            return this->emitError() << "one or both indeces out of bounds, got "
+                                     << "a=" << *(a.getRawData())
+                                     << ", b=" << *(b.getRawData())
+                                     << ", regsize=" << regsize;
+        if ((b-a).slt(2))
+            return this->emitError() << "slice must include at least 2 elements, got "
+                                     << (long long) *((b-a).getRawData());
+        if ((b-a) != newregsize)
+            return this->emitError() << "output register has wrong size, got " << newregsize
+                                     << ", requires " << *((b-a).getRawData());
+
+        return success();
+    }];
+
+    let assemblyFormat = [{
+        $reg `[` $a `,` $b `]` attr-dict `:` type($reg) `->` type($newreg)
+    }];
+}
+
+def GenRegOp : Quantum_Op<"genreg", [NoSideEffect]> {
+    let summary = "Generate a register from multiple qubits/quregs.";
+    let description = [{
+        This op allows to combine previously allocated qubits/quregs
+        into a new register for the purpose of passing it to other operations.
+
+        Example:
+
+        ```mlir
+        %0 = "q.alloc"() : () -> (!q.qubit)
+        %1 = "q.allocreg"() {size=2} : () -> (!q.qureg<2>)
+        %2 = "q.genreg"(%0, %1) : (!q.qubit, !q.qureg<2>) -> (!q.qureg<3>)
+        ```
+    }];
+
+    let arguments = (ins Variadic<Quantum_Type>:$inputs);
     let results = (outs Quantum_QuregType:$reg);
 }
 
