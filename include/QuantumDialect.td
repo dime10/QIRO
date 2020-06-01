@@ -17,17 +17,22 @@ def Quantum_Dialect : Dialect {
 // Base class for all operations in this dialect
 class Quantum_Op<string mnemonic, list<OpTrait> traits = []> :
         Op<Quantum_Dialect, mnemonic, traits>;
-
-// Provide definitions for the custom Quantum types to ODS. Syntax:
-//   def <TypeName> : Type<<predicate identifying type>, <description>>;
-//   `$_self` will be replaced with the entity this predicate is attached to.
+// Base class for all types in this dialect
+class Quantum_Type<string cppTypeName, string description> :
+        DialectType<Quantum_Dialect, CPred<"$_self.isa<" # cppTypeName # ">()">, description>;
 // NOTE: Use DialectType instead of Dialect, otherwise ODS will not declare parse/print functions.
-def Quantum_QubitType : DialectType<Quantum_Dialect,
-                                    CPred<"$_self.isa<QubitType>()">, "Quantum qubit type">;
-def Quantum_QuregType : DialectType<Quantum_Dialect,
-                                    CPred<"$_self.isa<QuregType>()">, "Quantum register type">;
 
-// Provide a definition of the types that are used within the Toy dialect.
-def Quantum_Type : AnyTypeOf<[Quantum_QubitType, Quantum_QuregType]>;
+// Provide definitions for the custom data types to ODS
+def Qubit_Type : Quantum_Type<"QubitType", "Quantum qubit type">;
+def Qureg_Type : Quantum_Type<"QuregType", "Quantum register type">;
+
+// Provide custom operation types representing a gate or circuit
+def Op_Type : Quantum_Type<"OpType", "Quantum op type">;
+def ControlledOp_Type : Quantum_Type<"COpType", "Quantum  c-op type">;
+def Circuit_Type : Quantum_Type<"CircType", "Quantum circuit type">;
+
+// Provide aggregate types that might be used in ops accepting multiple types
+def QData_Type : AnyTypeOf<[Qubit_Type, Qureg_Type]>;
+def QOp_Type : AnyTypeOf<[Op_Type, ControlledOp_Type, Circuit_Type]>;
 
 #endif // QUANTUM_DIALECT

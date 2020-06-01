@@ -19,7 +19,7 @@ QuantumDialect::QuantumDialect(mlir::MLIRContext *ctx) : mlir::Dialect("q", ctx)
         #include "QuantumOps.cpp.inc"
     >();
     
-    addTypes<QubitType, QuregType>();  // in mlir::quantum
+    addTypes<QubitType, QuregType, OpType, COpType, CircType>();  // in mlir::quantum
 
     // addAttributes<QuantumAttribute>();
     // addInterfaces<QuantumInterface>();
@@ -55,12 +55,28 @@ struct QuregTypeStorage : public mlir::TypeStorage {
         return new (allocator.allocate<QuregTypeStorage>()) QuregTypeStorage(key);
     }
 };
+
+// This class represents the internal storage of the Quantum 'COpType'.
+struct COpTypeStorage : public mlir::TypeStorage {
+    using KeyTy = unsigned;
+
+    unsigned nctrl;
+
+    COpTypeStorage(unsigned nctrl) { this->nctrl = nctrl; }
+
+    bool operator==(const KeyTy &key) const { return key == nctrl; }
+
+    static COpTypeStorage *construct(mlir::TypeStorageAllocator &allocator, const KeyTy &key) {
+        return new (allocator.allocate<COpTypeStorage>()) COpTypeStorage(key);
+    }
+};
 } // end namespace detail
 } // end namespace quantum
 } // end namespace mlir
 
-/* QuregType method implementations after QuregTypeStorage has been defined */
+/* Methods of complex types must be implemented after their TypeStorage has been defined */
 
+// Qureg
 QuregType QuregType::get(mlir::MLIRContext *ctx, unsigned size) {
     assert((size > 0) && "Qureg size must be > 0");
 
@@ -71,6 +87,19 @@ QuregType QuregType::get(mlir::MLIRContext *ctx, unsigned size) {
 unsigned QuregType::getNumQubits() {
     // 'getImpl' returns a pointer to our internal storage instance.
     return getImpl()->size;
+}
+
+// COp
+COpType COpType::get(mlir::MLIRContext *ctx, unsigned nctrl) {
+    assert((nctrl > 0) && "Qureg size must be > 0");
+
+    // Parameters to the storage class are passed after the custom type kind.
+    return Base::get(ctx, QuantumTypes::COp, nctrl);
+}
+
+unsigned COpType::getNumCtrls() {
+    // 'getImpl' returns a pointer to our internal storage instance.
+    return getImpl()->nctrl;
 }
 
 /* Finally, to be able to read and output .mlir code (roundtrip) from this dialect
@@ -88,6 +117,17 @@ void QuantumDialect::printType(mlir::Type type, mlir::DialectAsmPrinter &printer
         printer << "qureg<" << ctype.getNumQubits() << ">";
         break;
     }
+    case QuantumTypes::Op:
+        printer << "op";
+        break;
+    case QuantumTypes::COp: {
+        COpType ctype = type.cast<COpType>();
+        printer << "cop<" << ctype.getNumCtrls() << ">";
+        break;
+    }
+    case QuantumTypes::Circ:
+        printer << "circ";
+        break;
     default:
         throw "unrecognized type encountered in the printer!";
     }
@@ -120,6 +160,23 @@ mlir::Type QuantumDialect::parseType(mlir::DialectAsmParser &parser) const {
         }
         return QuregType::get(this->getContext(), size);
     }
+    if (keyword == "op")
+        return OpType::get(this->getContext());
+    if (keyword == "cop") {
+        unsigned nctrl;
+        if (parser.parseLess()) {
+            return nullptr;
+        }
+        if (parser.parseInteger<unsigned>(nctrl)) {
+            return nullptr;
+        }
+        if (parser.parseGreater()) {
+            return nullptr;
+        }
+        return COpType::get(this->getContext(), nctrl);
+    }
+    if (keyword == "circ")
+        return CircType::get(this->getContext());
 
     parser.emitError(parser.getNameLoc(), "unrecognized quantum type");
     return Type();

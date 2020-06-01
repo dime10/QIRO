@@ -19,7 +19,7 @@ def AllocOp : Quantum_Op<"alloc"> {
         ```
     }];
 
-    let results = (outs Quantum_QubitType:$qb);
+    let results = (outs Qubit_Type : $qb);
 }
 
 def AllocRegOp : Quantum_Op<"allocreg"> {
@@ -39,7 +39,7 @@ def AllocRegOp : Quantum_Op<"allocreg"> {
     }];
 
     let arguments = (ins Confined<APIntAttr, [IntPositive]>:$size);
-    let results = (outs Quantum_QuregType:$reg);
+    let results = (outs Qureg_Type : $reg);
 }
 
 def ExtrRegOp : Quantum_Op<"extract", [NoSideEffect]> {
@@ -58,9 +58,9 @@ def ExtrRegOp : Quantum_Op<"extract", [NoSideEffect]> {
         %2 = q.extract %0[2] : !q.qureg<4> -> !q.qubit
     }];
 
-    let arguments = (ins Quantum_QuregType:$reg,
-                         Confined<APIntAttr, [IntNonNegative]>:$idx);
-    let results = (outs Quantum_QubitType:$qb);
+    let arguments = (ins Qureg_Type : $reg,
+                         Confined<APIntAttr, [IntNonNegative]> : $idx);
+    let results = (outs Qubit_Type : $qb);
 
     let verifier = [{
         llvm::APInt idx = this->idx();
@@ -96,10 +96,10 @@ def SliceRegOp : Quantum_Op<"slice", [NoSideEffect]> {
         %2 = q.extract %0[1,4] : !q.qureg<4> -> !q.qureg<3>
     }];
 
-    let arguments = (ins Quantum_QuregType:$reg,
-                         Confined<APIntAttr, [IntNonNegative]>:$a,
-                         Confined<APIntAttr, [IntNonNegative]>:$b);
-    let results = (outs Quantum_QuregType:$newreg);
+    let arguments = (ins Qureg_Type : $reg,
+                         Confined<APIntAttr, [IntNonNegative]> : $a,
+                         Confined<APIntAttr, [IntNonNegative]> : $b);
+    let results = (outs Qureg_Type : $newreg);
 
     let verifier = [{
         llvm::APInt a = this->a();
@@ -142,8 +142,8 @@ def GenRegOp : Quantum_Op<"genreg", [NoSideEffect]> {
         ```
     }];
 
-    let arguments = (ins Variadic<Quantum_Type>:$inputs);
-    let results = (outs Quantum_QuregType:$reg);
+    let arguments = (ins Variadic<QData_Type> : $inputs);
+    let results = (outs Qureg_Type : $reg);
 }
 
 def HOp : Quantum_Op<"H"> {
@@ -155,8 +155,8 @@ def HOp : Quantum_Op<"H"> {
             [[1,  1],
              [1, -1]] / sqrt(2)
 
-        This operation takes a qubit as input and returns nothing.
-        Thus, it only acts via side-effects by changing the quantum state.
+        This operation takes a qubit as input and returns an 'op' type.
+        It acts on the qubits via side-effect by changing the quantum state.
 
         Example:
 
@@ -164,16 +164,14 @@ def HOp : Quantum_Op<"H"> {
         %0 = "q.alloc"() : () -> (!q.qubit)
         %1 = "q.allocreg"() {size=4} : () -> (!q.qureg<4>)
         // Apply a Hadamard gate to qubit %0
-        "q.H"(%0) : (!q.qubit) -> ()
+        $op1 = "q.H"(%0) : (!q.qubit) -> (!q.op)
         // Apply a Hadamard gate to each qubit in register %1
-        "q.H"(%1) : (!q.qureg<4>) -> ()
-        // Apply a Hadamard gate to each qubit in register %1 controlled upon the state of qubit %0
-        "q.H"(%1) {ctrls=%0} : (!q.qureg<4>) -> ()
+        $op2 = "q.H"(%1) : (!q.qureg<4>) -> (!q.op)
         ```
     }];
 
-    let arguments = (ins Quantum_Type:$qbs,
-                         Optional<Quantum_Type>:$ctrls);
+    let arguments = (ins QData_Type : $qbs);
+    let results = (outs Op_Type : $op);
 }
 
 def Barrier : Quantum_Op<"bar", [Terminator]> {
@@ -200,20 +198,82 @@ def Circuit : Quantum_Op<"circ"> {
         Example:
 
         ```mlir
-        %ctrls = "q.allocreg"() {size=4} : () -> (!q.qureg<4>)
-        "q.circ"(%ctrls) ({
+        %qbs = "q.allocreg"() {size=3} : () -> (!q.qureg<3>)
+        %c = "q.circ"() ({
         ^bb0:
-            %qbs = "q.allocreg"() {size=3} : () -> (!q.qureg<3>)
-            "q.H"(%qbs) : (!q.qureg<3>) -> ()
+            %op = "q.H"(%qbs) : (!q.qureg<3>) -> (!q.op)
             "q.bar"() : () -> ()
-        }) {repeat=6} : (!q.qureg<4>) -> ()
+        }) {repeat=6} : (!q.qureg<4>) -> (!q.circ)
         ```
     }];
 
-    // todo: multiple optional arguments?
-    let arguments = (ins Optional<Quantum_Type>:$ctrls,
-                         OptionalAttr<Confined<APIntAttr, [IntMinValue<2>]>>:$repeat);
-    let regions = (region SizedRegion<1>:$gates);
+    let arguments = (ins OptionalAttr<Confined<APIntAttr, [IntMinValue<2>]>> : $repeat);
+    let results = (outs Circuit_Type : $circ);
+    let regions = (region SizedRegion<1> : $gates);
+}
+
+def Control : Quantum_Op<"c"> {
+    let summary = "Control meta-op.";
+    let description = [{
+        This meta operation transforms any quantum op into an equivalent
+        controlled operation. Thus, the op is only executed if the state
+        of the control qubit (or register) is |1..>.
+
+        Accepted inputs are an individual quantum operations, a quantum
+        circuit, or an already controlled op. The result is a controlled op.
+
+        Example:
+
+        ```mlir
+        %0 = "q.allocate"() : () -> (!q.qubit)
+        %op = "q.H"(%0) : (!q.qubit) -> (!q.op)
+        $cop = "q.c"(%op) : (!q.op) -> (!q.cop)
+    }];
+
+    let arguments = (ins
+        QOp_Type : $op,
+        QData_Type: $ctrls,
+        Variadic<QData_Type> : $extractrls
+    );
+    let results = (outs
+        ControlledOp_Type : $cop
+    );
+
+    let verifier = [{
+        // obtain total number of control qubits from input
+        unsigned totalctrls = 0;
+
+        auto optype = this->op().getType();
+        if (optype.isa<COpType>()) {
+            totalctrls += optype.cast<COpType>().getNumCtrls();
+        }
+
+        auto qbtype = this->ctrls().getType();
+        if (qbtype.isa<QubitType>()) {
+            totalctrls++;
+        }
+        else if (qbtype.isa<QuregType>()) {
+            totalctrls += qbtype.cast<QuregType>().getNumQubits();
+        }
+
+        auto xtypes = this->extractrls().getTypes();
+        for (auto xtype : xtypes) {
+            if (xtype.isa<QubitType>()) {
+                totalctrls++;
+            }
+            else if (xtype.isa<QuregType>()) {
+                totalctrls += xtype.cast<QuregType>().getNumQubits();
+            }
+        }
+
+        // assert that this matches the output type
+        unsigned declctrls = this->cop().getType().cast<COpType>().getNumCtrls();
+        if (declctrls != totalctrls) {
+            return this->emitError() << "Number of output controls doesn't match inputs!";
+        }
+
+        return success();
+    }];
 }
 
 #endif // QUANTUM_OPS
