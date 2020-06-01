@@ -215,8 +215,6 @@ def Circuit : Quantum_Op<"circ"> {
         No control flow is allowed within such a block. However, these operations
         can then be repeated, inverted or controlled as as single unit.
 
-        The input consists of an optional attribute that specifies how many times
-        the circuit should be repeated (>= 2).
         Note that the gates are grouped within a block, which must be terminated
         with the special 'Barrier' operation.
 
@@ -228,11 +226,10 @@ def Circuit : Quantum_Op<"circ"> {
         ^bb0:
             %op = "q.H"(%qbs) : (!q.qureg<3>) -> (!q.op)
             "q.bar"() : () -> ()
-        }) {repeat=6} : (!q.qureg<4>) -> (!q.circ)
+        }) : (!q.qureg<4>) -> (!q.circ)
         ```
     }];
 
-    let arguments = (ins OptionalAttr<Confined<APIntAttr, [IntMinValue<2>]>> : $repeat);
     let results = (outs
         Circuit_Type : $circ
     );

@@ -12,21 +12,13 @@ module {
     %5 = q.slice %1[1,3] : !q.qureg<4> -> !q.qureg<2>
     %6 = "q.genreg"(%0, %1) : (!q.qubit, !q.qureg<4>) -> !q.qureg<5>
 
-    // create a small test circuit without any arguments
+    // create a small test circuit
     %c1 = "q.circ"() ({
         ^bb0:
             %qb = "q.alloc"() : () -> !q.qubit
             %op = "q.H"(%qb) : (!q.qubit) -> !q.op
             "q.bar"() : () -> ()
     }) : () -> !q.circ
-
-    // create a small testcircuit, which is repeated 6 times
-    %qbs = "q.allocreg"() {size=3} : () -> !q.qureg<3>
-    %c2 = "q.circ"() ({
-        ^bb0:
-            %op = "q.H"(%qbs) : (!q.qureg<3>) -> !q.op
-            "q.bar"() : () -> ()
-    }) {repeat=6} : () -> !q.circ
 
     // test control meta operation
     %qb = "q.alloc"() : () -> !q.qubit
