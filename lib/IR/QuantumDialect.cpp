@@ -5,7 +5,6 @@
 
 #include "mlir/IR/DialectImplementation.h"
 #include "mlir/IR/OpImplementation.h"
-#include "mlir/IR/StandardTypes.h"
 
 using namespace mlir;
 using namespace mlir::quantum;
@@ -108,7 +107,7 @@ unsigned COpType::getNumCtrls() {
 // Print an instance of a type registered in the Quantum dialect.
 void QuantumDialect::printType(mlir::Type type, mlir::DialectAsmPrinter &printer) const {
     // Differentiate between the Quantum types via their kinds and print accordingly.
-    switch(type.getKind()) {
+    switch (type.getKind()) {
     case QuantumTypes::Qubit:
         printer << "qubit";
         break;

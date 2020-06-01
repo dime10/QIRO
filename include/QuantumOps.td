@@ -5,12 +5,12 @@ include "QuantumDialect.td"
 include "mlir/Interfaces/SideEffectInterfaces.td"
 
 def AllocOp : Quantum_Op<"alloc"> {
-    let summary = "This allocates a qubit.";
+    let summary = "Allocate a qubit.";
     let description = [{
-        The allocation command registers a new qubit with the system, which is guaranteed to
-        be in the |0> state.
+        The allocation command registers a new qubit with the system, which
+        is guaranteed to be in the |0> state.
 
-        This operation takes no inputs and returns a value of type qubit.
+        This operation takes no inputs and returns a value of type 'qubit'.
 
         Example:
 
@@ -19,17 +19,19 @@ def AllocOp : Quantum_Op<"alloc"> {
         ```
     }];
 
-    let results = (outs Qubit_Type : $qb);
+    let results = (outs
+        Qubit_Type : $qb
+    );
 }
 
 def AllocRegOp : Quantum_Op<"allocreg"> {
-    let summary = "This allocates a qubit register.";
+    let summary = "Allocate a qubit register.";
     let description = [{
-        The allocation command registers a new qubit register with the system, which is guaranteed
-        to be in the |0..> state.
+        This allocation command registers a new qubit register with the system,
+        which is guaranteed to be in the |0..> state.
 
         This operation takes an integer attribute as input specifying the size,
-        and returns a value of type qureg<size>.
+        and returns a value of type 'qureg<size>'.
 
         Example:
 
@@ -38,8 +40,13 @@ def AllocRegOp : Quantum_Op<"allocreg"> {
         ```
     }];
 
-    let arguments = (ins Confined<APIntAttr, [IntPositive]>:$size);
-    let results = (outs Qureg_Type : $reg);
+    let arguments = (ins
+        Confined<APIntAttr, [IntMinValue<2>]> : $size
+    );
+
+    let results = (outs
+        Qureg_Type : $reg
+    );
 }
 
 def ExtrRegOp : Quantum_Op<"extract", [NoSideEffect]> {
@@ -48,7 +55,8 @@ def ExtrRegOp : Quantum_Op<"extract", [NoSideEffect]> {
         This op allows to get out individual qubits from a register.
         The register is passed as an argument, and the index as an attribute.
 
-        Supports custom assembly.
+        Supports a custom assembly format.
+
         Example:
 
         ```mlir
@@ -58,9 +66,14 @@ def ExtrRegOp : Quantum_Op<"extract", [NoSideEffect]> {
         %2 = q.extract %0[2] : !q.qureg<4> -> !q.qubit
     }];
 
-    let arguments = (ins Qureg_Type : $reg,
-                         Confined<APIntAttr, [IntNonNegative]> : $idx);
-    let results = (outs Qubit_Type : $qb);
+    let arguments = (ins
+        Qureg_Type : $reg,
+        Confined<APIntAttr, [IntNonNegative]> : $idx
+    );
+
+    let results = (outs
+        Qubit_Type : $qb
+    );
 
     let verifier = [{
         llvm::APInt idx = this->idx();
@@ -84,9 +97,10 @@ def SliceRegOp : Quantum_Op<"slice", [NoSideEffect]> {
     let description = [{
         This op allows to extract a continous range of qubits from a register.
         The register is passed as an argument, and the indeces as attributes.
-        Endpoint is included for left index but NOT the right index.
+        The endpoint is included for the left index but NOT the right index.
 
-        Supports custom assembly.
+        Supports a custom assembly format.
+
         Example:
 
         ```mlir
@@ -96,10 +110,15 @@ def SliceRegOp : Quantum_Op<"slice", [NoSideEffect]> {
         %2 = q.extract %0[1,4] : !q.qureg<4> -> !q.qureg<3>
     }];
 
-    let arguments = (ins Qureg_Type : $reg,
-                         Confined<APIntAttr, [IntNonNegative]> : $a,
-                         Confined<APIntAttr, [IntNonNegative]> : $b);
-    let results = (outs Qureg_Type : $newreg);
+    let arguments = (ins
+        Qureg_Type : $reg,
+        Confined<APIntAttr, [IntNonNegative]> : $a,
+        Confined<APIntAttr, [IntNonNegative]> : $b
+    );
+
+    let results = (outs
+        Qureg_Type : $newreg
+    );
 
     let verifier = [{
         llvm::APInt a = this->a();
@@ -147,10 +166,10 @@ def GenRegOp : Quantum_Op<"genreg", [NoSideEffect]> {
 }
 
 def HOp : Quantum_Op<"H"> {
-    let summary = "This is the Hadamard gate.";
+    let summary = "Hadamard gate.";
     let description = [{
-        The Hadamard gate is a single Qubit unitary.
-        Due to its hermitian property it is its own inverse. 
+        The Hadamard gate is a single Qubit (hermitian) unitary.
+        Due to its hermitian property it is also its own inverse.
         Its 2x2 matrix representation in the computational basis is given by:
             [[1,  1],
              [1, -1]] / sqrt(2)
@@ -170,30 +189,36 @@ def HOp : Quantum_Op<"H"> {
         ```
     }];
 
-    let arguments = (ins QData_Type : $qbs);
-    let results = (outs Op_Type : $op);
+    let arguments = (ins
+        QData_Type : $qbs
+    );
+
+    let results = (outs
+        Op_Type : $op
+    );
 }
 
 def Barrier : Quantum_Op<"bar", [Terminator]> {
-    let summary = "This marks the end of a circuit.";
+    let summary = "Marks the end of a circuit (block).";
     let description = [{
-        As a circuit is described by a block,
-        it needs to be terminated by an appropriate op.
+        This is an internal operation solely used to mark the end
+        of an mlir "block" which is used to hold all operations in
+        the circuit. A "terminator" op is required for all blocks
+        that do not transfer control flow.
     }];
 }
 
 def Circuit : Quantum_Op<"circ"> {
-    let summary = "This is a basic quantum circuit.";
+    let summary = "Create a basic quantum circuit.";
     let description = [{
         A basic quantum circuit is a simple block regrouping multiple gates.
-        These operations can then be repeated or controlled as as single unit.
+        No control flow is allowed within such a block. However, these operations
+        can then be repeated, inverted or controlled as as single unit.
 
-        The circuit input consists of an optional argument to specify a qubit
-        or register upon which the entire circuit should be controlled.
-        Additionally, an optional attribute specifies how many times the
-        circuit should be repeated (>= 2).
+        The input consists of an optional attribute that specifies how many times
+        the circuit should be repeated (>= 2).
         Note that the gates are grouped within a block, which must be terminated
-        with the special Barrier operation.
+        with the special 'Barrier' operation.
 
         Example:
 
@@ -208,7 +233,10 @@ def Circuit : Quantum_Op<"circ"> {
     }];
 
     let arguments = (ins OptionalAttr<Confined<APIntAttr, [IntMinValue<2>]>> : $repeat);
-    let results = (outs Circuit_Type : $circ);
+    let results = (outs
+        Circuit_Type : $circ
+    );
+
     let regions = (region SizedRegion<1> : $gates);
 }
 
@@ -235,6 +263,7 @@ def Control : Quantum_Op<"c"> {
         QData_Type: $ctrls,
         Variadic<QData_Type> : $extractrls
     );
+
     let results = (outs
         ControlledOp_Type : $cop
     );
