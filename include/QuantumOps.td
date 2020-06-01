@@ -22,6 +22,10 @@ def AllocOp : Quantum_Op<"alloc"> {
     let results = (outs
         Qubit_Type : $qb
     );
+
+    let assemblyFormat = [{
+        attr-dict `:` type($qb)
+    }];
 }
 
 def AllocRegOp : Quantum_Op<"allocreg"> {
@@ -47,6 +51,10 @@ def AllocRegOp : Quantum_Op<"allocreg"> {
     let results = (outs
         Qureg_Type : $reg
     );
+
+    let assemblyFormat = [{
+        `(`$size`)` attr-dict `:` type($reg)
+    }];
 }
 
 def ExtrRegOp : Quantum_Op<"extract", [NoSideEffect]> {
@@ -88,7 +96,7 @@ def ExtrRegOp : Quantum_Op<"extract", [NoSideEffect]> {
     }];
 
     let assemblyFormat = [{
-        $reg `[` $idx `]` attr-dict `:` type($reg) `->` type($qb)
+        $reg `[` $idx `]` attr-dict `:` functional-type(operands, results)
     }];
 }
 
@@ -142,7 +150,7 @@ def SliceRegOp : Quantum_Op<"slice", [NoSideEffect]> {
     }];
 
     let assemblyFormat = [{
-        $reg `[` $a `,` $b `]` attr-dict `:` type($reg) `->` type($newreg)
+        $reg `[` $a `,` $b `]` attr-dict `:` functional-type(operands, results)
     }];
 }
 
@@ -151,6 +159,10 @@ def GenRegOp : Quantum_Op<"genreg", [NoSideEffect]> {
     let description = [{
         This op allows to combine previously allocated qubits/quregs
         into a new register for the purpose of passing it to other operations.
+        Note that there is no checks against qubit overlap, that is putting
+        the same qubit into a register multiple times. This resposibility
+        is left to the code generating the IR, and thus the op should be
+        considered "internal".
 
         Example:
 
@@ -161,8 +173,58 @@ def GenRegOp : Quantum_Op<"genreg", [NoSideEffect]> {
         ```
     }];
 
-    let arguments = (ins Variadic<QData_Type> : $inputs);
-    let results = (outs Qureg_Type : $reg);
+    let arguments = (ins
+        QData_Type : $input1,
+        QData_Type : $input2,
+        Variadic<QData_Type> : $extrainputs
+    );
+
+    let results = (outs
+        Qureg_Type : $reg
+    );
+
+    let verifier = [{
+        // obtain total number of qubits from input
+        unsigned totalqbs = 0;
+
+        auto qbtype = this->input1().getType();
+        if (qbtype.isa<QubitType>()) {
+            totalqbs++;
+        }
+        else if (qbtype.isa<QuregType>()) {
+            totalqbs += qbtype.cast<QuregType>().getNumQubits();
+        }
+
+        qbtype = this->input2().getType();
+        if (qbtype.isa<QubitType>()) {
+            totalqbs++;
+        }
+        else if (qbtype.isa<QuregType>()) {
+            totalqbs += qbtype.cast<QuregType>().getNumQubits();
+        }
+
+        auto xtypes = this->extrainputs().getTypes();
+        for (auto xtype : xtypes) {
+            if (xtype.isa<QubitType>()) {
+                totalqbs++;
+            }
+            else if (xtype.isa<QuregType>()) {
+                totalqbs += xtype.cast<QuregType>().getNumQubits();
+            }
+        }
+
+        // assert that this matches the output type
+        unsigned declsize = this->reg().getType().cast<QuregType>().getNumQubits();
+        if (declsize != totalqbs) {
+            return this->emitError() << "Number of qubits in the output doesn't match inputs!";
+        }
+
+        return success();
+    }];
+
+    let assemblyFormat = [{
+        operands attr-dict `:` functional-type(operands, results)
+    }];
 }
 
 def HOp : Quantum_Op<"H"> {
@@ -196,9 +258,13 @@ def HOp : Quantum_Op<"H"> {
     let results = (outs
         Op_Type : $op
     );
+
+    let assemblyFormat = [{
+        $qbs attr-dict `:` functional-type(operands, results)
+    }];
 }
 
-def Barrier : Quantum_Op<"bar", [Terminator]> {
+def BarrierOp : Quantum_Op<"bar", [Terminator]> {
     let summary = "Marks the end of a circuit (block).";
     let description = [{
         This is an internal operation solely used to mark the end
@@ -206,9 +272,13 @@ def Barrier : Quantum_Op<"bar", [Terminator]> {
         the circuit. A "terminator" op is required for all blocks
         that do not transfer control flow.
     }];
+
+    let assemblyFormat = [{
+       attr-dict `:` `(` `)`
+    }];
 }
 
-def Circuit : Quantum_Op<"circ"> {
+def CircuitOp : Quantum_Op<"circ"> {
     let summary = "Create a basic quantum circuit.";
     let description = [{
         A basic quantum circuit is a simple block regrouping multiple gates.
@@ -226,7 +296,7 @@ def Circuit : Quantum_Op<"circ"> {
         ^bb0:
             %op = "q.H"(%qbs) : (!q.qureg<3>) -> (!q.op)
             "q.bar"() : () -> ()
-        }) : (!q.qureg<4>) -> (!q.circ)
+        }) : () -> (!q.circ)
         ```
     }];
 
@@ -237,7 +307,7 @@ def Circuit : Quantum_Op<"circ"> {
     let regions = (region SizedRegion<1> : $gates);
 }
 
-def Control : Quantum_Op<"c"> {
+def ControlOp : Quantum_Op<"c"> {
     let summary = "Control meta-op.";
     let description = [{
         This meta operation transforms any quantum op into an equivalent
@@ -250,7 +320,7 @@ def Control : Quantum_Op<"c"> {
         Example:
 
         ```mlir
-        %0 = "q.allocate"() : () -> (!q.qubit)
+        %0 = "q.alloc"() : () -> (!q.qubit)
         %op = "q.H"(%0) : (!q.qubit) -> (!q.op)
         $cop = "q.c"(%op) : (!q.op) -> (!q.cop)
     }];
@@ -299,6 +369,10 @@ def Control : Quantum_Op<"c"> {
         }
 
         return success();
+    }];
+
+    let assemblyFormat = [{
+        operands attr-dict `:` functional-type(operands, results)
     }];
 }
 
