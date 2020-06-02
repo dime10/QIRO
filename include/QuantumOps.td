@@ -57,7 +57,7 @@ def AllocRegOp : Quantum_Op<"allocreg"> {
     }];
 }
 
-def ExtrRegOp : Quantum_Op<"extract", [NoSideEffect]> {
+def ExtractOp : Quantum_Op<"extract", [NoSideEffect]> {
     let summary = "Extract single qubit from register.";
     let description = [{
         This op allows to get out individual qubits from a register.
