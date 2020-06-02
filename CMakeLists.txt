@@ -17,6 +17,7 @@ project(qcompile LANGUAGES CXX C)
 
 set(CMAKE_CXX_STANDARD 14 CACHE STRING "C++ standard to conform to")
 
+# set mlir build path HERE
 set(CMAKE_PREFIX_PATH ${CMAKE_PREFIX_PATH} ${CMAKE_CURRENT_SOURCE_DIR}/../../llvm-project/build/lib/cmake/mlir)
 find_package(MLIR REQUIRED CONFIG)
 
