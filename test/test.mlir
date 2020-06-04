@@ -13,6 +13,20 @@ module {
     %op2 = "q.H"(%2) : (!q.qureg<4>) -> !q.op
     %op3 = q.H %2 : (!q.qureg<4>) -> !q.op
 
+    %op4 = "q.X"(%0) : (!q.qubit) -> !q.op
+    %op5 =  q.X %0 : (!q.qubit) -> !q.op
+    %op6 = "q.X"(%2) : (!q.qureg<4>) -> !q.op
+    %op7 =  q.X %2 : (!q.qureg<4>) -> !q.op
+
+    %op8 = "q.RZ"(%0) {phi=0.1} : (!q.qubit) -> !q.op
+    %op9 =  q.RZ(0.1) %0 : (!q.qubit) -> !q.op
+    %op10 = "q.RZ"(%2) {phi=0.1} : (!q.qureg<4>) -> !q.op
+    %op11 =  q.RZ(0.1) %2 : (!q.qureg<4>) -> !q.op
+
+    %op12 = "q.CX"(%0, %1) : (!q.qubit, !q.qubit) -> !q.cop<1>
+    %op13 =  q.CX %0, %1 : (!q.qubit, !q.qubit) -> !q.cop<1>
+    %op14 = "q.CX"(%2, %1) : (!q.qureg<4>, !q.qubit) -> !q.cop<1>
+    %op15 =  q.CX %2, %1 : (!q.qureg<4>, !q.qubit) -> !q.cop<1>
 
     // test register operations (extracting qubit, slicing register, combining to register)
     %4 = "q.extract"(%2) {idx=2} : (!q.qureg<4>) -> !q.qubit
@@ -53,4 +67,12 @@ module {
     %cch1 = q.c %ch0, %2 : (!q.cop<1>, !q.qureg<4>) -> !q.cop<5>
     %cc0 = "q.c"(%c0, %0) : (!q.circ, !q.qubit) -> !q.cop<1>
     %cc1 = q.c %c0, %0 : (!q.circ, !q.qubit) -> !q.cop<1>
+    // test adjoint meta operation
+    %hdg0 = "q.adj"(%h) : (!q.op) -> !q.op
+    %hdg1 =  q.adj %h : (!q.op) -> !q.op
+    %hdg2 = "q.adj"(%ch0) : (!q.cop<1>) -> !q.cop<1>
+    %hdg3 =  q.adj %ch0 : (!q.cop<1>) -> !q.cop<1>
+    %hdg4 = "q.adj"(%c0) : (!q.circ) -> !q.circ
+    %hdg5 =  q.adj %c0 : (!q.circ) -> !q.circ
+    //%hdg6 = q.adj %h : (!q.op) -> !q.cop<1>
 }

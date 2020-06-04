@@ -3,6 +3,11 @@
 
 include "mlir/IR/OpBase.td"
 
+def APFloatAttr : Attr<CPred<"$_self.isa<FloatAttr>()">, "arbitrary float atribute"> {
+    let storageType = [{ FloatAttr }];
+    let returnType = [{ APFloat }];
+}
+
 // Define the basic properties of our dialect
 def Quantum_Dialect : Dialect {
     let name = "q";

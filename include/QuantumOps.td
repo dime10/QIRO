@@ -264,6 +264,112 @@ def HOp : Quantum_Op<"H"> {
     }];
 }
 
+def XOp : Quantum_Op<"X"> {
+    let summary = "NOT gate.";
+    let description = [{
+        The NOT gate is a single Qubit (hermitian) unitary.
+        Due to its hermitian property it is also its own inverse.
+        Its 2x2 matrix representation in the computational basis is given by:
+            [[0, 1],
+             [1, 0]]
+
+        This operation takes a qubit as input and returns an 'op' type.
+        It acts on the qubits via side-effect by changing the quantum state.
+
+        Example:
+
+        ```mlir
+        $op = "q.X"(%0) : (!q.qubit) -> (!q.op)
+        ```
+    }];
+
+    let arguments = (ins
+        QData_Type : $qbs
+    );
+
+    let results = (outs
+        Op_Type : $op
+    );
+
+    let assemblyFormat = [{
+        $qbs attr-dict `:` functional-type(operands, results)
+    }];
+}
+
+def RzOp : Quantum_Op<"RZ"> {
+    let summary = "Z-Rotation gate.";
+    let description = [{
+        The Rz gate is a single Qubit unitary.
+        It rotates a qubit state by an angle φ along the z-axis.
+        Its 2x2 matrix representation in the computational basis is given by:
+            [[1,   0 ],
+             [0, e^iφ]]
+
+        This operation takes a qubit as input and returns an 'op' type.
+        The parameter φ is passed as an attribute.
+        It acts on the qubits via side-effect by changing the quantum state.
+
+        Example:
+
+        ```mlir
+        $op = "q.RZ"(%0) {phi=0.1} : (!q.qubit) -> (!q.op)
+        // OR in custom assembly format
+        $op = q.RZ(0.1) %0 : (!q.qubit) -> !q.op
+        ```
+    }];
+
+    let arguments = (ins
+        QData_Type : $qbs,
+        APFloatAttr : $phi
+    );
+
+    let results = (outs
+        Op_Type : $op
+    );
+
+    let assemblyFormat = [{
+        `(` $phi `)` $qbs attr-dict `:` functional-type(operands, results)
+    }];
+}
+
+def CNotOp : Quantum_Op<"CX"> {
+    let summary = "CNOT gate.";
+    let description = [{
+        The CNOT gate is a two Qubit (hermitian) unitary.
+        Due to its hermitian property it is also its own inverse.
+        Its 4x4 matrix representation in the computational basis is given by:
+            [[1, 0, 0, 0],
+             [0, 1, 0, 0],
+             [0, 0, 0, 1],
+             [0, 0, 1, 0]]
+
+        As with other basic operations, the target is allowed to be either a qubit or
+        a register (in which case the gate is applied to every qubit in the register).
+        The control however must be a singular qubit. The return type is a 'cop'.
+        It acts on the qubits via side-effect by changing the quantum state.
+        Note that the control qubit MUST NOT appear as one of target qubits (not checked atm).
+
+        Example:
+
+        ```mlir
+        $op = "q.CX"(%0, %1) : (!q.qubit, !q.qubit) -> (!q.cop<1>)
+        ```
+    }];
+
+    let arguments = (ins
+        QData_Type : $trgts,
+        Qubit_Type : $ctrl
+    );
+
+    let results = (outs
+        ControlledOp_Type : $op
+    );
+
+    let assemblyFormat = [{
+        $trgts `,` $ctrl attr-dict `:` functional-type(operands, results)
+    }];
+}
+
 def BarrierOp : Quantum_Op<"bar", [Terminator]> {
     let summary = "Marks the end of a circuit (block).";
     let description = [{
@@ -373,6 +479,36 @@ def ControlOp : Quantum_Op<"c"> {
 
     let assemblyFormat = [{
         operands attr-dict `:` functional-type(operands, results)
+    }];
+}
+
+def AdjointOp : Quantum_Op<"adj", [SameOperandsAndResultType]> {
+    let summary = "(Hermitian) adjoint meta-op.";
+    let description = [{
+        This meta operation transforms any quantum op into its complex conjugate
+        transpose version. Since all quantum gates are unitary, the resulting op
+        is equal to the inverse operation.
+
+        Accepted inputs are any quantum operations, such as a gate, circuit, or
+        controlled op. The result is an op.
+
+        Example:
+
+        ```mlir
+        %h = "q.H"(%0) : (!q.qubit) -> (!q.op)
+        $hdg = "q.adj"(h) : (!q.op) -> (!q.op)
+    }];
+
+    let arguments = (ins
+        QOp_Type : $op
+    );
+
+    let results = (outs
+        QOp_Type : $opadj
+    );
+
+    let assemblyFormat = [{
+        $op attr-dict `:` functional-type(operands, results)
     }];
 }
 
