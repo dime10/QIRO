@@ -63,8 +63,6 @@ def ExtractOp : Quantum_Op<"extract", [NoSideEffect]> {
         This op allows to get out individual qubits from a register.
         The register is passed as an argument, and the index as an attribute.
 
-        Supports a custom assembly format.
-
         Example:
 
         ```mlir
@@ -106,8 +104,6 @@ def SliceRegOp : Quantum_Op<"slice", [NoSideEffect]> {
         This op allows to extract a continous range of qubits from a register.
         The register is passed as an argument, and the indeces as attributes.
         The endpoint is included for the left index but NOT the right index.
-
-        Supports a custom assembly format.
 
         Example:
 

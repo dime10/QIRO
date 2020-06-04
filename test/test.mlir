@@ -3,15 +3,15 @@
 module {
     // test basic operations, including their custom assembly format
     %0 = "q.alloc"() : () -> !q.qubit
-    %1 = q.alloc : !q.qubit
+    %1 =  q.alloc : !q.qubit
 
     %2 = "q.allocreg"() {size=4} : () -> !q.qureg<4>
-    %3 = q.allocreg(4) : !q.qureg<4>
+    %3 =  q.allocreg(4) : !q.qureg<4>
 
     %op0 = "q.H"(%0) : (!q.qubit) -> !q.op
-    %op1 = q.H %0 : (!q.qubit) -> !q.op
+    %op1 =  q.H %0 : (!q.qubit) -> !q.op
     %op2 = "q.H"(%2) : (!q.qureg<4>) -> !q.op
-    %op3 = q.H %2 : (!q.qureg<4>) -> !q.op
+    %op3 =  q.H %2 : (!q.qureg<4>) -> !q.op
 
     %op4 = "q.X"(%0) : (!q.qubit) -> !q.op
     %op5 =  q.X %0 : (!q.qubit) -> !q.op
@@ -30,19 +30,19 @@ module {
 
     // test register operations (extracting qubit, slicing register, combining to register)
     %4 = "q.extract"(%2) {idx=2} : (!q.qureg<4>) -> !q.qubit
-    %5 = q.extract %2[2] : (!q.qureg<4>) -> !q.qubit
+    %5 =  q.extract %2[2] : (!q.qureg<4>) -> !q.qubit
     //%12 = q.extract %2[4] : (!q.qureg<4>) -> !q.qubit
 
     %6 = "q.slice"(%2) {a=1, b=4} : (!q.qureg<4>) -> !q.qureg<3>
-    %7 = q.slice %2[1, 4] : (!q.qureg<4>) -> !q.qureg<3>
+    %7 =  q.slice %2[1, 4] : (!q.qureg<4>) -> !q.qureg<3>
     //%12 = q.slice %2[1,2] : (!q.qureg<4>) -> !q.qureg<1>
     //%12 = q.slice %2[3,5] : (!q.qureg<4>) -> !q.qureg<2>
     //%12 = q.slice %2[1,3] : (!q.qureg<4>) -> !q.qureg<1>
 
     %8 = "q.genreg"(%0, %2) : (!q.qubit, !q.qureg<4>) -> !q.qureg<5>
-    %9 = q.genreg %0, %2 : (!q.qubit, !q.qureg<4>) -> !q.qureg<5>
+    %9 =  q.genreg %0, %2 : (!q.qubit, !q.qureg<4>) -> !q.qureg<5>
     %10 = "q.genreg"(%0, %2, %1) : (!q.qubit, !q.qureg<4>, !q.qubit) -> !q.qureg<6>
-    %11 = q.genreg %0, %2, %1 : (!q.qubit, !q.qureg<4>, !q.qubit) -> !q.qureg<6>
+    %11 =  q.genreg %0, %2, %1 : (!q.qubit, !q.qureg<4>, !q.qubit) -> !q.qureg<6>
     //%12 = q.genreg %0, %2, %1 : (!q.qubit, !q.qureg<4>, !q.qubit) -> !q.qureg<8>
 
 
@@ -59,14 +59,15 @@ module {
     %ch0 = "q.c"(%h, %1) : (!q.op, !q.qubit) -> !q.cop<1>
     %ch1 =  q.c %h, %1 : (!q.op, !q.qubit) -> !q.cop<1>
     %ch2 = "q.c"(%h, %2) : (!q.op, !q.qureg<4>) -> !q.cop<4>
-    %ch3 = q.c %h, %2 : (!q.op, !q.qureg<4>) -> !q.cop<4>
+    %ch3 =  q.c %h, %2 : (!q.op, !q.qureg<4>) -> !q.cop<4>
     %ch4 = "q.c"(%h, %1, %2) : (!q.op, !q.qubit, !q.qureg<4>) -> !q.cop<5>
-    %ch5 = q.c %h, %1, %2 : (!q.op, !q.qubit, !q.qureg<4>) -> !q.cop<5>
+    %ch5 =  q.c %h, %1, %2 : (!q.op, !q.qubit, !q.qureg<4>) -> !q.cop<5>
     //%ch6 = q.c %h, %1, %2 : (!q.op, !q.qubit, !q.qureg<4>) -> !q.cop<9>
     %cch0 = "q.c"(%ch0, %2) : (!q.cop<1>, !q.qureg<4>) -> !q.cop<5>
-    %cch1 = q.c %ch0, %2 : (!q.cop<1>, !q.qureg<4>) -> !q.cop<5>
+    %cch1 =  q.c %ch0, %2 : (!q.cop<1>, !q.qureg<4>) -> !q.cop<5>
     %cc0 = "q.c"(%c0, %0) : (!q.circ, !q.qubit) -> !q.cop<1>
-    %cc1 = q.c %c0, %0 : (!q.circ, !q.qubit) -> !q.cop<1>
+    %cc1 =  q.c %c0, %0 : (!q.circ, !q.qubit) -> !q.cop<1>
+
     // test adjoint meta operation
     %hdg0 = "q.adj"(%h) : (!q.op) -> !q.op
     %hdg1 =  q.adj %h : (!q.op) -> !q.op

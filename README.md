@@ -1,4 +1,4 @@
-This is the quantum optimizing compiler project in MLIR.
+# This is the quantum optimizing compiler project in MLIR.
 The project can be built using the CMake file in this directory.
 First, make sure to download and build llvm (at least the mlir part),
 then run:
@@ -26,5 +26,12 @@ ProjectFolder
 |   |-> ...
 ```
 
-Here is an overview of the different modules used in this project and how they relate to each other:
+&nbsp;
+
+## Have a look at the high-level design decisions here:
+[DesignDoc](DesignDoc.md)
+
+&nbsp;
+
+## Technical overview of the different modules used in this project:
 ![](Hierarchy.png)
