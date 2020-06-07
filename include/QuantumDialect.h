@@ -8,6 +8,13 @@
 #include "mlir/Interfaces/SideEffectInterfaces.h"
 
 namespace mlir {
+namespace OpTrait {
+template <typename ConcreteType>
+class UnitaryTrait : public OpTrait::TraitBase<ConcreteType, UnitaryTrait> {};
+template <typename ConcreteType>
+class HermitianTrait : public OpTrait::TraitBase<ConcreteType, HermitianTrait> {};
+} // namespace OpTrait
+
 namespace quantum {
 namespace detail {
 struct QuregTypeStorage;

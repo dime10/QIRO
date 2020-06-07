@@ -223,7 +223,7 @@ def GenRegOp : Quantum_Op<"genreg", [NoSideEffect]> {
     }];
 }
 
-def HOp : Quantum_Op<"H"> {
+def HOp : Quantum_Op<"H", [Unitary, Hermitian]> {
     let summary = "Hadamard gate.";
     let description = [{
         The Hadamard gate is a single Qubit (hermitian) unitary.
@@ -260,7 +260,7 @@ def HOp : Quantum_Op<"H"> {
     }];
 }
 
-def XOp : Quantum_Op<"X"> {
+def XOp : Quantum_Op<"X", [Unitary, Hermitian]> {
     let summary = "NOT gate.";
     let description = [{
         The NOT gate is a single Qubit (hermitian) unitary.
@@ -292,7 +292,7 @@ def XOp : Quantum_Op<"X"> {
     }];
 }
 
-def RzOp : Quantum_Op<"RZ"> {
+def RzOp : Quantum_Op<"RZ", [Unitary]> {
     let summary = "Z-Rotation gate.";
     let description = [{
         The Rz gate is a single Qubit unitary.
@@ -328,7 +328,7 @@ def RzOp : Quantum_Op<"RZ"> {
     }];
 }
 
-def CNotOp : Quantum_Op<"CX"> {
+def CNotOp : Quantum_Op<"CX", [Unitary, Hermitian]> {
     let summary = "CNOT gate.";
     let description = [{
         The CNOT gate is a two Qubit (hermitian) unitary.
@@ -380,7 +380,7 @@ def BarrierOp : Quantum_Op<"bar", [Terminator]> {
     }];
 }
 
-def CircuitOp : Quantum_Op<"circ"> {
+def CircuitOp : Quantum_Op<"circ", [Unitary]> {
     let summary = "Create a basic quantum circuit.";
     let description = [{
         A basic quantum circuit is a simple block regrouping multiple gates.

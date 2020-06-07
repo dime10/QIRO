@@ -40,4 +40,8 @@ def Circuit_Type : Quantum_Type<"CircType", "Quantum circuit type">;
 def QData_Type : AnyTypeOf<[Qubit_Type, Qureg_Type]>;
 def QOp_Type : AnyTypeOf<[Op_Type, ControlledOp_Type, Circuit_Type]>;
 
+// Define new dialect traits
+def Unitary : NativeOpTrait<"UnitaryTrait">;
+def Hermitian : NativeOpTrait<"HermitianTrait">;
+ 
 #endif // QUANTUM_DIALECT
