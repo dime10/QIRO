@@ -1,5 +1,4 @@
 // test module for all quantum operations, commented ops are supposed to fail
-
 module {
     // test basic operations, including their custom assembly format
     %0 = "q.alloc"() : () -> !q.qubit
@@ -45,14 +44,20 @@ module {
     %11 =  q.genreg %0, %2, %1 : (!q.qubit, !q.qureg<4>, !q.qubit) -> !q.qureg<6>
     //%12 = q.genreg %0, %2, %1 : (!q.qubit, !q.qureg<4>, !q.qubit) -> !q.qureg<8>
 
-
     // create a small test circuit
+    %qb0 = q.alloc : !q.qubit
+    %qb1 = q.alloc : !q.qubit
+
     %c0 = "q.circ"() ({
-        ^bb0:
-            %qb = q.alloc : !q.qubit
-            %op = q.H %qb : (!q.qubit) -> !q.op
-            q.bar : ()
+        q.H %qb0 : (!q.qubit) -> !q.op
+        q.CX %qb1, %qb0 : (!q.qubit, !q.qubit) -> !q.cop<1>
+        q.bar : ()
     }) : () -> !q.circ
+
+    %c1 = q.circ {
+        q.H %qb0 : (!q.qubit) -> !q.op
+        q.CX %qb1, %qb0 : (!q.qubit, !q.qubit) -> !q.cop<1>
+    } : !q.circ
 
     // test control meta operation, including on: ops, cops, and circs, test variadic input
     %h = q.H %0 : (!q.qubit) -> !q.op

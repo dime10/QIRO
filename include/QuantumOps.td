@@ -410,6 +410,9 @@ def CircuitOp : Quantum_Op<"circ", [Unitary, ImplicitQuantumTerminator]> {
     );
 
     let regions = (region SizedRegion<1> : $gates);
+
+    let printer = [{ return ::print(p, *this); }];
+    let parser = [{ return ::parse$cppClass(parser, result); }];
 }
 
 def ControlOp : Quantum_Op<"c"> {

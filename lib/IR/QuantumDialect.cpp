@@ -181,5 +181,49 @@ mlir::Type QuantumDialect::parseType(mlir::DialectAsmParser &parser) const {
     return Type();
 }
 
+//===------------------------------------------------------------------------------------------===//
+// Custom CircuitOp assembly format
+//===------------------------------------------------------------------------------------------===//
+static void print(OpAsmPrinter &p, CircuitOp op) {
+    p << op.getOperationName();
+    p.printRegion(op.gates(), /*printEntryBlockArgs=*/false, /*printBlockTerminators=*/false);
+    p.printOptionalAttrDict(op.getAttrs(), /*elidedAttrs=*/{});
+    p << " : " << op.getType();
+}
+
+static ParseResult parseCircuitOp(OpAsmParser &p, OperationState &result) {
+    auto &builder = p.getBuilder();
+
+    // Parse the body region.
+    Region *body = result.addRegion();
+    if (p.parseRegion(*body, {}, {}))
+        return failure();
+
+    CircuitOp::ensureTerminator(*body, builder, result.location);
+
+    // Parse the optional attribute list.
+    if (p.parseOptionalAttrDict(result.attributes))
+        return failure();
+
+    // Parse return type
+    Type type;
+    llvm::SMLoc trailingTypeLoc;
+    if (p.parseColon() || p.getCurrentLocation(&trailingTypeLoc) || p.parseType(type))
+        return failure();
+
+    // Extract the result type from the trailing function type.
+    auto funcType = type.dyn_cast<FunctionType>();
+    if (funcType) {
+        if (funcType.getNumInputs() != 0 || funcType.getNumResults() != 1)
+            return p.emitError(trailingTypeLoc,
+                "expected trailing function type with no argument and one result");
+        result.addTypes({funcType.getResult(0)});
+    } else {
+        result.addTypes({type});
+    }
+
+    return success();
+}
+
 #define GET_OP_CLASSES
 #include "QuantumOps.cpp.inc"
