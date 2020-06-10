@@ -4,6 +4,9 @@
 include "QuantumDialect.td"
 include "mlir/Interfaces/SideEffectInterfaces.td"
 
+// Allow for an implicit terminator in blocks
+def ImplicitQuantumTerminator : SingleBlockImplicitTerminator<"BarrierOp">;
+
 def AllocOp : Quantum_Op<"alloc"> {
     let summary = "Allocate a qubit.";
     let description = [{
@@ -380,7 +383,7 @@ def BarrierOp : Quantum_Op<"bar", [Terminator]> {
     }];
 }
 
-def CircuitOp : Quantum_Op<"circ", [Unitary]> {
+def CircuitOp : Quantum_Op<"circ", [Unitary, ImplicitQuantumTerminator]> {
     let summary = "Create a basic quantum circuit.";
     let description = [{
         A basic quantum circuit is a simple block regrouping multiple gates.
