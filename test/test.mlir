@@ -51,7 +51,7 @@ module {
     %c0 = "q.circ"() ({
         q.H %qb0 : (!q.qubit) -> !q.op
         q.CX %qb1, %qb0 : (!q.qubit, !q.qubit) -> !q.cop<1>
-        q.term : ()
+        q.term
     }) : () -> !q.circ
 
     %c1 = q.circ {

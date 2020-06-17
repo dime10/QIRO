@@ -14,6 +14,9 @@ class UnitaryTrait : public OpTrait::TraitBase<ConcreteType, UnitaryTrait> {};
 
 template <typename ConcreteType>
 class HermitianTrait : public OpTrait::TraitBase<ConcreteType, HermitianTrait> {};
+
+template <typename ConcreteType>
+class MetaOpTrait : public OpTrait::TraitBase<ConcreteType, MetaOpTrait> {};
 } // namespace OpTrait
 
 namespace quantum {

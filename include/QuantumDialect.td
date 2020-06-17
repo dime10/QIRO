@@ -43,6 +43,7 @@ def QOp_Type : AnyTypeOf<[Op_Type, ControlledOp_Type, Circuit_Type]>;
 // Define new dialect traits
 def Unitary : NativeOpTrait<"UnitaryTrait">;
 def Hermitian : NativeOpTrait<"HermitianTrait">;
+def Meta : NativeOpTrait<"MetaOpTrait">;
 def ImplicitQuantumTerminator : SingleBlockImplicitTerminator<"TerminatorOp">;
 
 #endif // QUANTUM_DIALECT

@@ -391,7 +391,7 @@ def TerminatorOp : Quantum_Op<"term", [Terminator]> {
     }];
 
     let assemblyFormat = [{
-       attr-dict `:` `(` `)`
+       attr-dict
     }];
 }
 
@@ -432,7 +432,7 @@ def CircuitOp : Quantum_Op<"circ", [Unitary, ImplicitQuantumTerminator]> {
     let parser = [{ return ::parse$cppClass(parser, result); }];
 }
 
-def ControlOp : Quantum_Op<"c"> {
+def ControlOp : Quantum_Op<"c", [Meta]> {
     let summary = "Control meta-op.";
     let description = [{
         This meta operation transforms any quantum op into an equivalent
@@ -498,7 +498,7 @@ def ControlOp : Quantum_Op<"c"> {
     }];
 }
 
-def AdjointOp : Quantum_Op<"adj", [SameOperandsAndResultType]> {
+def AdjointOp : Quantum_Op<"adj", [Meta, SameOperandsAndResultType]> {
     let summary = "(Hermitian) adjoint meta-op.";
     let description = [{
         This meta operation transforms any quantum op into its complex conjugate
