@@ -1,33 +1,12 @@
 // test module for all quantum operations, commented ops are supposed to fail
 module {
-    // test basic operations, including their custom assembly format
+    // test register operations (extracting qubit, slicing register, combining to register)
     %0 = "q.alloc"() : () -> !q.qubit
     %1 =  q.alloc : !q.qubit
 
     %2 = "q.allocreg"() {size=4} : () -> !q.qureg<4>
     %3 =  q.allocreg(4) : !q.qureg<4>
 
-    %op0 = "q.H"(%0) : (!q.qubit) -> !q.op
-    %op1 =  q.H %0 : (!q.qubit) -> !q.op
-    %op2 = "q.H"(%2) : (!q.qureg<4>) -> !q.op
-    %op3 =  q.H %2 : (!q.qureg<4>) -> !q.op
-
-    %op4 = "q.X"(%0) : (!q.qubit) -> !q.op
-    %op5 =  q.X %0 : (!q.qubit) -> !q.op
-    %op6 = "q.X"(%2) : (!q.qureg<4>) -> !q.op
-    %op7 =  q.X %2 : (!q.qureg<4>) -> !q.op
-
-    %op8 = "q.RZ"(%0) {phi=0.1} : (!q.qubit) -> !q.op
-    %op9 =  q.RZ(0.1) %0 : (!q.qubit) -> !q.op
-    %op10 = "q.RZ"(%2) {phi=0.1} : (!q.qureg<4>) -> !q.op
-    %op11 =  q.RZ(0.1) %2 : (!q.qureg<4>) -> !q.op
-
-    %op12 = "q.CX"(%0, %1) : (!q.qubit, !q.qubit) -> !q.cop<1>
-    %op13 =  q.CX %0, %1 : (!q.qubit, !q.qubit) -> !q.cop<1>
-    %op14 = "q.CX"(%2, %1) : (!q.qureg<4>, !q.qubit) -> !q.cop<1>
-    %op15 =  q.CX %2, %1 : (!q.qureg<4>, !q.qubit) -> !q.cop<1>
-
-    // test register operations (extracting qubit, slicing register, combining to register)
     %4 = "q.extract"(%2) {idx=2} : (!q.qureg<4>) -> !q.qubit
     %5 =  q.extract %2[2] : (!q.qureg<4>) -> !q.qubit
     //q.extract %2[4] : (!q.qureg<4>) -> !q.qubit
@@ -44,41 +23,78 @@ module {
     %11 =  q.genreg %0, %2, %1 : (!q.qubit, !q.qureg<4>, !q.qubit) -> !q.qureg<6>
     //q.genreg %0, %2, %1 : (!q.qubit, !q.qureg<4>, !q.qubit) -> !q.qureg<8>
 
-    // create a small test circuit
-    %qb0 = q.alloc : !q.qubit
-    %qb1 = q.alloc : !q.qubit
+    // test basic gates, including their custom assembly formats
+    "q.H"(%0) : (!q.qubit) -> ()
+    q.H %0 : (!q.qubit) -> ()
+    "q.H"(%2) : (!q.qureg<4>) -> ()
+    q.H %2 : (!q.qureg<4>) -> ()
+    %op0 = "q.H"() : () -> !q.op
+    %op1 = q.H : () -> !q.op
+    //"q.H"(%0) : (!q.qubit) -> !q.op
+    //"q.H"() : () -> ()
 
-    %c0 = "q.circ"() ({
-        q.H %qb0 : (!q.qubit) -> !q.op
-        q.CX %qb1, %qb0 : (!q.qubit, !q.qubit) -> !q.cop<1>
+    "q.X"(%0) : (!q.qubit) -> ()
+    q.X %0 : (!q.qubit) -> ()
+    "q.X"(%2) : (!q.qureg<4>) -> ()
+    q.X %2 : (!q.qureg<4>) -> ()
+    %op2 = "q.X"() : () -> !q.op
+    %op3 = q.X : () -> !q.op
+
+    "q.RZ"(%0) {phi=0.1} : (!q.qubit) -> ()
+    q.RZ(0.1) %0 : (!q.qubit) -> ()
+    "q.RZ"(%2) {phi=0.1} : (!q.qureg<4>) -> ()
+    q.RZ(0.1) %2 : (!q.qureg<4>) -> ()
+    %op4 = "q.RZ"() {phi=0.1} : () -> !q.op
+    %op5 = q.RZ(0.1) : () -> !q.op
+
+    "q.CX"(%1, %0) : (!q.qubit, !q.qubit) -> ()
+    q.CX %1, %0 : (!q.qubit, !q.qubit) -> ()
+    "q.CX"(%2, %0) : (!q.qureg<4>, !q.qubit) -> ()
+    q.CX %2, %0 : (!q.qureg<4>, !q.qubit) -> ()
+    %op6 = "q.CX"(%0) : (!q.qubit) -> !q.cop<1>
+    %op7 = q.CX %0 : (!q.qubit) -> !q.cop<1>
+
+    // create a small test circuit
+    %circ = "q.circ"() ({
+        q.H %0 : (!q.qubit) -> ()
+        q.CX %1, %0 : (!q.qubit, !q.qubit) -> ()
         q.term
     }) : () -> !q.circ
 
-    %c1 = q.circ {
-        q.H %qb0 : (!q.qubit) -> !q.op
-        q.CX %qb1, %qb0 : (!q.qubit, !q.qubit) -> !q.cop<1>
+    q.circ {
+        q.H %0 : (!q.qubit) -> ()
+        q.CX %1, %0 : (!q.qubit, !q.qubit) -> ()
     } : !q.circ
 
-    // test control meta operation, including on: ops, cops, and circs, test variadic input
-    %h = q.H %0 : (!q.qubit) -> !q.op
-    %ch0 = "q.c"(%h, %1) : (!q.op, !q.qubit) -> !q.cop<1>
-    %ch1 =  q.c %h, %1 : (!q.op, !q.qubit) -> !q.cop<1>
-    %ch2 = "q.c"(%h, %2) : (!q.op, !q.qureg<4>) -> !q.cop<4>
-    %ch3 =  q.c %h, %2 : (!q.op, !q.qureg<4>) -> !q.cop<4>
-    %ch4 = "q.c"(%h, %1, %2) : (!q.op, !q.qubit, !q.qureg<4>) -> !q.cop<5>
-    %ch5 =  q.c %h, %1, %2 : (!q.op, !q.qubit, !q.qureg<4>) -> !q.cop<5>
-    //%ch6 = q.c %h, %1, %2 : (!q.op, !q.qubit, !q.qureg<4>) -> !q.cop<9>
-    %cch0 = "q.c"(%ch0, %2) : (!q.cop<1>, !q.qureg<4>) -> !q.cop<5>
-    %cch1 =  q.c %ch0, %2 : (!q.cop<1>, !q.qureg<4>) -> !q.cop<5>
-    %cc0 = "q.c"(%c0, %0) : (!q.circ, !q.qubit) -> !q.cop<1>
-    %cc1 =  q.c %c0, %0 : (!q.circ, !q.qubit) -> !q.cop<1>
+    // test control meta operation, including on: ops, cops, and circs//, test variadic input
+    "q.c"(%op0, %1, %0) : (!q.op, !q.qubit, !q.qubit) -> ()
+    q.c %op0, %1, %0 : (!q.op, !q.qubit, !q.qubit) -> ()
+    "q.c"(%op0, %1, %2) : (!q.op, !q.qubit, !q.qureg<4>) -> ()
+    q.c %op0, %1, %2 : (!q.op, !q.qubit, !q.qureg<4>) -> ()
+    "q.c"(%op0, %2, %0) : (!q.op, !q.qureg<4>, !q.qubit) -> ()
+    q.c %op0, %2, %0 : (!q.op, !q.qureg<4>, !q.qubit) -> ()
+    "q.c"(%op6, %1, %0) : (!q.cop<1>, !q.qubit, !q.qubit) -> ()
+    q.c %op6, %1, %0 : (!q.cop<1>, !q.qubit, !q.qubit) -> ()
+    "q.c"(%circ, %1, %0) : (!q.circ, !q.qubit, !q.qubit) -> ()
+    q.c %circ, %1, %0 : (!q.circ, !q.qubit, !q.qubit) -> ()
+
+    %cop0 = "q.c"(%op0, %0) : (!q.op, !q.qubit) -> !q.cop<1>
+    %cop1 = q.c %op0, %0 : (!q.op, !q.qubit) -> !q.cop<1>
+    %ccop0 = "q.c"(%cop0, %2) : (!q.cop<1>, !q.qureg<4>) -> !q.cop<5>
+    %ccop1 =  q.c %cop0, %2 : (!q.cop<1>, !q.qureg<4>) -> !q.cop<5>
+    %ccirc0 = "q.c"(%circ, %0) : (!q.circ, !q.qubit) -> !q.cop<1>
+    %ccirc1 =  q.c %circ, %0 : (!q.circ, !q.qubit) -> !q.cop<1>
+    //q.c %op0, %2 : (!q.op, !q.qureg<4>) -> !q.cop<5>
+    //q.c %ccop0, %2 : (!q.cop<5>, !q.qureg<4>) -> !q.cop<3>
 
     // test adjoint meta operation
-    %hdg0 = "q.adj"(%h) : (!q.op) -> !q.op
-    %hdg1 =  q.adj %h : (!q.op) -> !q.op
-    %hdg2 = "q.adj"(%ch0) : (!q.cop<1>) -> !q.cop<1>
-    %hdg3 =  q.adj %ch0 : (!q.cop<1>) -> !q.cop<1>
-    %hdg4 = "q.adj"(%c0) : (!q.circ) -> !q.circ
-    %hdg5 =  q.adj %c0 : (!q.circ) -> !q.circ
-    //%hdg6 = q.adj %h : (!q.op) -> !q.cop<1>
+    "q.adj"(%op0, %0) : (!q.op, !q.qubit) -> ()
+    q.adj %op0, %0 : (!q.op, !q.qubit) -> ()
+    "q.adj"(%cop0, %0) : (!q.cop<1>, !q.qubit) -> ()
+    q.adj %cop0, %0 : (!q.cop<1>, !q.qubit) -> ()
+    "q.adj"(%circ) : (!q.circ) -> !q.circ // fix the circuit cases
+    q.adj %circ : (!q.circ) -> !q.circ // fix the circuit cases
+    %aop0 = "q.adj"(%op0) : (!q.op) -> !q.op
+    %aop1 = q.adj %op0 : (!q.op) -> !q.op
+    //q.adj %op0 : (!q.op) -> !q.cop<1>
 }

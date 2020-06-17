@@ -4,6 +4,28 @@
 include "QuantumDialect.td"
 include "mlir/Interfaces/SideEffectInterfaces.td"
 
+// Base class for "gates", i.e. operations executable on a quantum computer
+class Quantum_Gate<string mnemonic, list<OpTrait> traits = []> : Quantum_Op<mnemonic, traits> {
+    let description = [{
+        A "gate" op is one that supports the instation of itself without requiring
+        immediate application to specific qubits. That means that the target qubits
+        need not necessarily be supplied (signifying the op is on hold) and need to
+        be tagged 'optional' in ODS, with a fixed name (used by the verifier): "qbs".
+        Similarly, the output of type !q.op will only be generated for an op on hold,
+        and thus needs to be tagged 'optional' as well, with the fixed name: "op".
+        Note that the verifier will check that only one of the two is given/returned.
+    }];
+
+    string additionalVerifier = "";
+    let verifier = additionalVerifier#[{
+        if (!this->qbs() && !this->op())
+            return this->emitError() << "Need to either specify target qubits or return type!";
+        if (this->qbs() && this->op())
+            return this->emitError() << "Cannot specify both target qubits and return type!";
+
+        return success();
+    }];
+}
 
 def AllocOp : Quantum_Op<"alloc"> {
     let summary = "Allocate a qubit.";
@@ -228,7 +250,7 @@ def GenRegOp : Quantum_Op<"genreg", [NoSideEffect]> {
     }];
 }
 
-def HOp : Quantum_Op<"H", [Unitary, Hermitian]> {
+def HOp : Quantum_Gate<"H", [Unitary, Hermitian]> {
     let summary = "Hadamard gate.";
     let description = [{
         The Hadamard gate is a single Qubit (hermitian) unitary.
@@ -246,18 +268,22 @@ def HOp : Quantum_Op<"H", [Unitary, Hermitian]> {
         %0 = "q.alloc"() : () -> !q.qubit
         %1 = "q.allocreg"() {size=4} : () -> !q.qureg<4>
         // Apply a Hadamard gate to qubit %0
-        $op1 = "q.H"(%0) : (!q.qubit) -> (!q.op)
+        "q.H"(%0) : (!q.qubit) -> ()
         // Apply a Hadamard gate to each qubit in register %1
-        $op2 = "q.H"(%1) : (!q.qureg<4>) -> (!q.op)
+        "q.H"(%1) : (!q.qureg<4>) -> ()
+        // Generate Hadamard op without application to qubits (to be manipulated via meta-ops)
+        $op = "q.H"() : () -> !q.op
+        // OR in custom assembly format
+        %op = q.H : () -> !q.op
         ```
     }];
 
     let arguments = (ins
-        QData_Type : $qbs
+        Optional<QData_Type> : $qbs
     );
 
     let results = (outs
-        Op_Type : $op
+        Optional<Op_Type> : $op
     );
 
     let assemblyFormat = [{
@@ -265,7 +291,7 @@ def HOp : Quantum_Op<"H", [Unitary, Hermitian]> {
     }];
 }
 
-def XOp : Quantum_Op<"X", [Unitary, Hermitian]> {
+def XOp : Quantum_Gate<"X", [Unitary, Hermitian]> {
     let summary = "NOT gate.";
     let description = [{
         The NOT gate is a single Qubit (hermitian) unitary.
@@ -283,24 +309,30 @@ def XOp : Quantum_Op<"X", [Unitary, Hermitian]> {
         %0 = "q.alloc"() : () -> !q.qubit
         %1 = "q.allocreg"() {size=4} : () -> !q.qureg<4>
         // Apply a NOT gate to qubit %0
-        $op = "q.X"(%0) : (!q.qubit) -> !q.op
+        "q.X"(%0) : (!q.qubit) -> ()
+        // Apply a NOT gate to each qubit in register %1
+        "q.X"(%1) : (!q.qureg<4>) -> ()
+        // Generate NOT op without application to qubits (to be manipulated via meta-ops)
+        $op = "q.X"() : () -> !q.op
+        // OR in custom assembly format
+        %op = q.X : () -> !q.op
         ```
     }];
 
     let arguments = (ins
-        QData_Type : $qbs
+        Optional<QData_Type> : $qbs
     );
 
     let results = (outs
-        Op_Type : $op
+        Optional<Op_Type> : $op
     );
 
     let assemblyFormat = [{
-        $qbs attr-dict `:` functional-type(operands, results)
+        operands attr-dict `:` functional-type(operands, results)
     }];
 }
 
-def RzOp : Quantum_Op<"RZ", [Unitary]> {
+def RzOp : Quantum_Gate<"RZ", [Unitary]> {
     let summary = "Z-Rotation gate.";
     let description = [{
         The Rz gate is a single Qubit unitary.
@@ -319,19 +351,23 @@ def RzOp : Quantum_Op<"RZ", [Unitary]> {
         %0 = "q.alloc"() : () -> !q.qubit
         %1 = "q.allocreg"() {size=4} : () -> !q.qureg<4>
         // Apply a z-rotation by angle 0.1 to qubit %0
-        $op = "q.RZ"(%0) {phi=0.1} : (!q.qubit) -> !q.op
+        "q.RZ"(%0) {phi=0.1}: (!q.qubit) -> ()
+        // Apply a z-rotation by angle 0.1 to each qubit in register %1
+        "q.RZ"(%1) {phi=0.1} : (!q.qureg<4>) -> ()
+        // Generate RZ gate without application to qubits (to be manipulated via meta-ops)
+        $op = "q.RZ"() {phi=0.1} : () -> !q.op
         // OR in custom assembly format
-        $op = q.RZ(0.1) %0 : (!q.qubit) -> !q.op
+        %op = q.RZ(0.1) : () -> !q.op
         ```
     }];
 
     let arguments = (ins
-        QData_Type : $qbs,
+        Optional<QData_Type> : $qbs,
         APFloatAttr : $phi
     );
 
     let results = (outs
-        Op_Type : $op
+        Optional<Op_Type> : $op
     );
 
     let assemblyFormat = [{
@@ -339,7 +375,7 @@ def RzOp : Quantum_Op<"RZ", [Unitary]> {
     }];
 }
 
-def CNotOp : Quantum_Op<"CX", [Unitary, Hermitian]> {
+def CNotOp : Quantum_Gate<"CX", [Unitary, Hermitian]> {
     let summary = "CNOT gate.";
     let description = [{
         The CNOT gate is a two Qubit (hermitian) unitary.
@@ -363,17 +399,23 @@ def CNotOp : Quantum_Op<"CX", [Unitary, Hermitian]> {
         %1 = "q.alloc"() : () -> !q.qubit
         %2 = "q.allocreg"() {size=4} : () -> !q.qureg<4>
         // Apply a CNOT to target %1 and control %0
-        $op = "q.CX"(%0, %1) : (!q.qubit, !q.qubit) -> !q.cop<1>
+        "q.CX"(%1, %0) : (!q.qubit, !q.qubit) -> ()
+        // Apply a CNOT with control %0 to each qubit in register %2
+        "q.CX"(%2, %0) : (!q.qureg<4>, !q.qubit) -> ()
+        // Generate CNOT gate without application to qubits (to be manipulated via meta-ops)
+        $op = "q.CX"(%0) : (!q.qubit) -> !q.cop<1>
+        // OR in custom assembly format
+        $op = q.CX %0 : (!q.qubit) -> !q.cop<1>
         ```
     }];
 
     let arguments = (ins
-        QData_Type : $trgts,
+        Optional<QData_Type> : $qbs,
         Qubit_Type
     );
 
     let results = (outs
-        ControlledOp_Type : $op
+        Optional<ControlledOp_Type> : $op
     );
 
     let assemblyFormat = [{
@@ -432,39 +474,54 @@ def CircuitOp : Quantum_Op<"circ", [Unitary, ImplicitQuantumTerminator]> {
     let parser = [{ return ::parse$cppClass(parser, result); }];
 }
 
-def ControlOp : Quantum_Op<"c", [Meta]> {
+def ControlOp : Quantum_Gate<"c", [Meta]> {
     let summary = "Control meta-op.";
     let description = [{
-        This meta operation transforms any quantum op into an equivalent
-        controlled operation. Thus, the op is only executed if the state
-        of the control qubit (or register) is |1..>.
+        This meta operation transforms a quantum op that has not been applied
+        yet into a controlled operation. The target is optional again so that
+        the op can further be transformed with meta-ops.
+        A controlled operation only executes its base op if the state of the
+        control qubit (or register) is |1..>.
 
-        Accepted inputs are an individual quantum operations, a quantum
-        circuit, or an already controlled op. The result is a controlled op.
+        Accepted inputs are: individual quantum operations, quantum circuits,
+        or already controlled ops. The result is a controlled op (if no target
+        was given).
 
         Example:
 
         ```mlir
-        %0 = "q.alloc"() : () -> (!q.qubit)
-        %op = "q.H"(%0) : (!q.qubit) -> (!q.op)
-        $cop = "q.c"(%op) : (!q.op) -> (!q.cop)
+        %0 = "q.alloc"() : () -> !q.qubit
+        %1 = "q.alloc"() : () -> !q.qubit
+        %2 = "q.allocreg"() {size=4} : () -> !q.qureg<4>
+        %op = "q.H"() : () -> !q.op
+        // Control H op on qubit %1 and apply to qubit %0
+        "q.c"(%op, %0, %1) : (!q.op, !q.qubit, !q.qubit) -> ()
+        // Control H op on all of register %2 and apply to qubit %0
+        "q.c"(%op, %0, %2) : (!q.op, !q.qubit, !q.qureg<4>) -> ()
+        // Control H op on qubit %1 and apply to all qubits in register %2
+        "q.c"(%op, %2, %1) : (!q.op, !q.qureg<4>, !q.qubit) -> ()
+        // Control H op on qubit %1 but leave application open
+        %cop = "q.c"(%op, %1) : (!q.op, !q.qubit) -> !q.cop<1>
+        // OR in custom assembly format
+        %cop = q.c %op, %1 : (!q.op, !q.qubit) -> !q.cop<1>
     }];
 
     let arguments = (ins
-        QOp_Type : $op,
-        QData_Type: $ctrls,
-        Variadic<QData_Type> : $extractrls
+        QOp_Type : $heldOp,
+        Optional<QData_Type> : $qbs,
+        QData_Type: $ctrls
+        // Variadic<QData_Type> : $extractrls
     );
 
     let results = (outs
-        ControlledOp_Type : $cop
+        Optional<ControlledOp_Type> : $op
     );
 
-    let verifier = [{
+    let additionalVerifier = [{
         // obtain total number of control qubits from input
         unsigned totalctrls = 0;
 
-        auto optype = this->op().getType();
+        auto optype = this->heldOp().getType();
         if (optype.isa<COpType>())
             totalctrls += optype.cast<COpType>().getNumCtrls();
 
@@ -474,23 +531,17 @@ def ControlOp : Quantum_Op<"c", [Meta]> {
         else if (qbtype.isa<QuregType>())
             totalctrls += qbtype.cast<QuregType>().getNumQubits();
 
-        auto xtypes = this->extractrls().getTypes();
-        for (auto xtype : xtypes) {
-            if (xtype.isa<QubitType>()) {
-                totalctrls++;
-            }
-            else if (xtype.isa<QuregType>()) {
-                totalctrls += xtype.cast<QuregType>().getNumQubits();
-            }
-        }
+        //auto xtypes = this->extractrls().getTypes();
+        //for (auto xtype : xtypes) {
+        //    if (xtype.isa<QubitType>())
+        //        totalctrls++;
+        //    else if (xtype.isa<QuregType>())
+        //        totalctrls += xtype.cast<QuregType>().getNumQubits();
+        //}
 
         // assert that this matches the output type
-        unsigned declctrls = this->cop().getType().cast<COpType>().getNumCtrls();
-        if (declctrls != totalctrls) {
+        if (this->op() && this->op().getType().cast<COpType>().getNumCtrls() != totalctrls)
             return this->emitError() << "Number of output controls doesn't match inputs!";
-        }
-
-        return success();
     }];
 
     let assemblyFormat = [{
@@ -498,30 +549,48 @@ def ControlOp : Quantum_Op<"c", [Meta]> {
     }];
 }
 
-def AdjointOp : Quantum_Op<"adj", [Meta, SameOperandsAndResultType]> {
+def AdjointOp : Quantum_Gate<"adj", [Meta]> {
     let summary = "(Hermitian) adjoint meta-op.";
     let description = [{
-        This meta operation transforms any quantum op into its complex conjugate
-        transpose version. Since all quantum gates are unitary, the resulting op
-        is equal to the inverse operation.
+        This meta operation transforms a quantum op that has not been applied
+        yet into a complex-conjugated, transposed version. The target is optional
+        again so that the op can further be transformed with meta-ops.
+        Since all quantum gates are unitary, the resulting op is equal to the
+        inverse operation.
 
-        Accepted inputs are any quantum operations, such as a gate, circuit, or
-        controlled op. The result is an op.
+        Accepted inputs are: individual quantum operations, quantum circuits,
+        or controlled ops. The result is the same type as the input (if no
+        target was given).
 
         Example:
 
         ```mlir
-        %h = "q.H"(%0) : (!q.qubit) -> (!q.op)
-        $hdg = "q.adj"(h) : (!q.op) -> (!q.op)
+        %0 = "q.alloc"() : () -> !q.qubit
+        %1 = "q.allocreg"() {size=4} : () -> !q.qureg<4>
+        %op = "q.H"() : () -> !q.op
+        // Invert H op and apply to qubit %0
+        "q.adj"(%op, %0) : (!q.op, !q.qubit) -> ()
+        // Invert H op apply to all qubits in register %1
+        "q.adj"(%op, %1) : (!q.op, !q.qureg<4>) -> ()
+        // Invert H op but leave application open
+        %opdg = "q.adj"(%op) : (!q.op) -> !q.op
+        // OR in custom assembly format
+        %opdg = q.adj %op : (!q.op) -> !q.op
     }];
 
     let arguments = (ins
-        QOp_Type : $op
+        QOp_Type : $heldOp,
+        Optional<QData_Type> : $qbs
     );
 
     let results = (outs
-        QOp_Type : $opadj
+        Optional<QOp_Type> : $op
     );
+
+    let additionalVerifier = [{
+        if (this->op() && this->heldOp().getType() != this->op().getType())
+            return this->emitError() << "Input op type must match output op type!";
+    }];
 
     let assemblyFormat = [{
         operands attr-dict `:` functional-type(operands, results)
