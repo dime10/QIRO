@@ -4,8 +4,6 @@
 include "QuantumDialect.td"
 include "mlir/Interfaces/SideEffectInterfaces.td"
 
-// Allow for an implicit terminator in blocks
-def ImplicitQuantumTerminator : SingleBlockImplicitTerminator<"BarrierOp">;
 
 def AllocOp : Quantum_Op<"alloc"> {
     let summary = "Allocate a qubit.";
@@ -18,7 +16,10 @@ def AllocOp : Quantum_Op<"alloc"> {
         Example:
 
         ```mlir
-        %0 = "q.alloc"() : () -> (!q.qubit)
+        // Allocate single qubit
+        %qb = "q.alloc"() : () -> !q.qubit
+        // OR in custom assembly format
+        %qb = q.alloc : !q.qubit
         ```
     }];
 
@@ -43,7 +44,10 @@ def AllocRegOp : Quantum_Op<"allocreg"> {
         Example:
 
         ```mlir
-        %0 = "q.allocreg"() {size=4} : () -> (!q.qureg<4>)
+        // Allocate qubit register
+        %reg = "q.allocreg"() {size=4} : () -> !q.qureg<4>
+        // OR in custom assembly format
+        %reg = q.allocreg(4) : !q.qureg<4>
         ```
     }];
 
@@ -69,10 +73,11 @@ def ExtractOp : Quantum_Op<"extract", [NoSideEffect]> {
         Example:
 
         ```mlir
-        %0 = "q.allocreg"() {size=4} : () -> (!q.qureg<4>)
-        %1 = "q.extract"(%0) {idx=2} : (!q.qureg<4>) -> (!q.qubit)
+        %0 = "q.allocreg"() {size=4} : () -> !q.qureg<4>
+        // Extract single qubit from register
+        %qb = "q.extract"(%0) {idx=2} : (!q.qureg<4>) -> !q.qubit
         // OR in custom assembly format
-        %2 = q.extract %0[2] : !q.qureg<4> -> !q.qubit
+        %qb = q.extract %0[2] : (!q.qureg<4>) -> !q.qubit
     }];
 
     let arguments = (ins
@@ -81,7 +86,7 @@ def ExtractOp : Quantum_Op<"extract", [NoSideEffect]> {
     );
 
     let results = (outs
-        Qubit_Type : $qb
+        Qubit_Type
     );
 
     let verifier = [{
@@ -111,10 +116,11 @@ def SliceRegOp : Quantum_Op<"slice", [NoSideEffect]> {
         Example:
 
         ```mlir
-        %0 = "q.allocreg"() {size=4} : () -> (!q.qureg<4>)
-        %1 = "q.extract"(%0) {a=1, b=4} : (!q.qureg<4>) -> (!q.qureg<3>)
+        %0 = "q.allocreg"() {size=4} : () -> !q.qureg<4>
+        // Extract range of qubits from register
+        %reg = "q.extract"(%0) {a=1, b=4} : (!q.qureg<4>) -> !q.qureg<3>
         // OR in custom assembly format
-        %2 = q.extract %0[1,4] : !q.qureg<4> -> !q.qureg<3>
+        %reg = q.extract %0[1,4] : (!q.qureg<4>) -> !q.qureg<3>
     }];
 
     let arguments = (ins
@@ -166,9 +172,12 @@ def GenRegOp : Quantum_Op<"genreg", [NoSideEffect]> {
         Example:
 
         ```mlir
-        %0 = "q.alloc"() : () -> (!q.qubit)
-        %1 = "q.allocreg"() {size=2} : () -> (!q.qureg<2>)
-        %2 = "q.genreg"(%0, %1) : (!q.qubit, !q.qureg<2>) -> (!q.qureg<3>)
+        %0 = "q.alloc"() : () -> !q.qubit
+        %1 = "q.allocreg"() {size=2} : () -> !q.qureg<2>
+        // Generate new register from other qubits/registers
+        %reg = "q.genreg"(%0, %1) : (!q.qubit, !q.qureg<2>) -> !q.qureg<3>
+        // OR in custom assembly format
+        %reg = q.genreg %0, %1 : (!q.qubit, !q.qureg<2>) -> !q.qureg<3>
         ```
     }];
 
@@ -179,7 +188,7 @@ def GenRegOp : Quantum_Op<"genreg", [NoSideEffect]> {
     );
 
     let results = (outs
-        Qureg_Type : $reg
+        Qureg_Type : $newreg
     );
 
     let verifier = [{
@@ -187,36 +196,29 @@ def GenRegOp : Quantum_Op<"genreg", [NoSideEffect]> {
         unsigned totalqbs = 0;
 
         auto qbtype = this->input1().getType();
-        if (qbtype.isa<QubitType>()) {
+        if (qbtype.isa<QubitType>())
             totalqbs++;
-        }
-        else if (qbtype.isa<QuregType>()) {
+        else if (qbtype.isa<QuregType>())
             totalqbs += qbtype.cast<QuregType>().getNumQubits();
-        }
 
         qbtype = this->input2().getType();
-        if (qbtype.isa<QubitType>()) {
+        if (qbtype.isa<QubitType>())
             totalqbs++;
-        }
-        else if (qbtype.isa<QuregType>()) {
+        else if (qbtype.isa<QuregType>())
             totalqbs += qbtype.cast<QuregType>().getNumQubits();
-        }
 
         auto xtypes = this->extrainputs().getTypes();
         for (auto xtype : xtypes) {
-            if (xtype.isa<QubitType>()) {
+            if (xtype.isa<QubitType>())
                 totalqbs++;
-            }
-            else if (xtype.isa<QuregType>()) {
+            else if (xtype.isa<QuregType>())
                 totalqbs += xtype.cast<QuregType>().getNumQubits();
-            }
         }
 
         // assert that this matches the output type
-        unsigned declsize = this->reg().getType().cast<QuregType>().getNumQubits();
-        if (declsize != totalqbs) {
+        unsigned declsize = this->newreg().getType().cast<QuregType>().getNumQubits();
+        if (declsize != totalqbs)
             return this->emitError() << "Number of qubits in the output doesn't match inputs!";
-        }
 
         return success();
     }];
@@ -241,8 +243,8 @@ def HOp : Quantum_Op<"H", [Unitary, Hermitian]> {
         Example:
 
         ```mlir
-        %0 = "q.alloc"() : () -> (!q.qubit)
-        %1 = "q.allocreg"() {size=4} : () -> (!q.qureg<4>)
+        %0 = "q.alloc"() : () -> !q.qubit
+        %1 = "q.allocreg"() {size=4} : () -> !q.qureg<4>
         // Apply a Hadamard gate to qubit %0
         $op1 = "q.H"(%0) : (!q.qubit) -> (!q.op)
         // Apply a Hadamard gate to each qubit in register %1
@@ -259,7 +261,7 @@ def HOp : Quantum_Op<"H", [Unitary, Hermitian]> {
     );
 
     let assemblyFormat = [{
-        $qbs attr-dict `:` functional-type(operands, results)
+        operands attr-dict `:` functional-type(operands, results)
     }];
 }
 
@@ -278,7 +280,10 @@ def XOp : Quantum_Op<"X", [Unitary, Hermitian]> {
         Example:
 
         ```mlir
-        $op = "q.X"(%0) : (!q.qubit) -> (!q.op)
+        %0 = "q.alloc"() : () -> !q.qubit
+        %1 = "q.allocreg"() {size=4} : () -> !q.qureg<4>
+        // Apply a NOT gate to qubit %0
+        $op = "q.X"(%0) : (!q.qubit) -> !q.op
         ```
     }];
 
@@ -311,7 +316,10 @@ def RzOp : Quantum_Op<"RZ", [Unitary]> {
         Example:
 
         ```mlir
-        $op = "q.RZ"(%0) {phi=0.1} : (!q.qubit) -> (!q.op)
+        %0 = "q.alloc"() : () -> !q.qubit
+        %1 = "q.allocreg"() {size=4} : () -> !q.qureg<4>
+        // Apply a z-rotation by angle 0.1 to qubit %0
+        $op = "q.RZ"(%0) {phi=0.1} : (!q.qubit) -> !q.op
         // OR in custom assembly format
         $op = q.RZ(0.1) %0 : (!q.qubit) -> !q.op
         ```
@@ -351,13 +359,17 @@ def CNotOp : Quantum_Op<"CX", [Unitary, Hermitian]> {
         Example:
 
         ```mlir
-        $op = "q.CX"(%0, %1) : (!q.qubit, !q.qubit) -> (!q.cop<1>)
+        %0 = "q.alloc"() : () -> !q.qubit
+        %1 = "q.alloc"() : () -> !q.qubit
+        %2 = "q.allocreg"() {size=4} : () -> !q.qureg<4>
+        // Apply a CNOT to target %1 and control %0
+        $op = "q.CX"(%0, %1) : (!q.qubit, !q.qubit) -> !q.cop<1>
         ```
     }];
 
     let arguments = (ins
         QData_Type : $trgts,
-        Qubit_Type : $ctrl
+        Qubit_Type
     );
 
     let results = (outs
@@ -365,11 +377,11 @@ def CNotOp : Quantum_Op<"CX", [Unitary, Hermitian]> {
     );
 
     let assemblyFormat = [{
-        $trgts `,` $ctrl attr-dict `:` functional-type(operands, results)
+        operands attr-dict `:` functional-type(operands, results)
     }];
 }
 
-def BarrierOp : Quantum_Op<"bar", [Terminator]> {
+def TerminatorOp : Quantum_Op<"term", [Terminator]> {
     let summary = "Marks the end of a circuit (block).";
     let description = [{
         This is an internal operation solely used to mark the end
@@ -396,20 +408,25 @@ def CircuitOp : Quantum_Op<"circ", [Unitary, ImplicitQuantumTerminator]> {
         Example:
 
         ```mlir
-        %qbs = "q.allocreg"() {size=3} : () -> (!q.qureg<3>)
+        %0 = "q.allocreg"() {size=3} : () -> !q.qureg<3>
         %c = "q.circ"() ({
-        ^bb0:
-            %op = "q.H"(%qbs) : (!q.qureg<3>) -> (!q.op)
+            "q.H"(%0) : (!q.qureg<3>) -> ()
             "q.bar"() : () -> ()
-        }) : () -> (!q.circ)
+        }) : () -> !q.circ
+        // OR in custom assembly
+        %c = q.circ {
+            q.H %0 : (!q.qureg<3>) -> ()
+        } !q.circ
         ```
     }];
 
     let results = (outs
-        Circuit_Type : $circ
+        Circuit_Type
     );
 
-    let regions = (region SizedRegion<1> : $gates);
+    let regions = (region
+        SizedRegion<1> : $gates
+    );
 
     let printer = [{ return ::print(p, *this); }];
     let parser = [{ return ::parse$cppClass(parser, result); }];
@@ -448,17 +465,14 @@ def ControlOp : Quantum_Op<"c"> {
         unsigned totalctrls = 0;
 
         auto optype = this->op().getType();
-        if (optype.isa<COpType>()) {
+        if (optype.isa<COpType>())
             totalctrls += optype.cast<COpType>().getNumCtrls();
-        }
 
         auto qbtype = this->ctrls().getType();
-        if (qbtype.isa<QubitType>()) {
+        if (qbtype.isa<QubitType>())
             totalctrls++;
-        }
-        else if (qbtype.isa<QuregType>()) {
+        else if (qbtype.isa<QuregType>())
             totalctrls += qbtype.cast<QuregType>().getNumQubits();
-        }
 
         auto xtypes = this->extractrls().getTypes();
         for (auto xtype : xtypes) {
@@ -510,7 +524,7 @@ def AdjointOp : Quantum_Op<"adj", [SameOperandsAndResultType]> {
     );
 
     let assemblyFormat = [{
-        $op attr-dict `:` functional-type(operands, results)
+        operands attr-dict `:` functional-type(operands, results)
     }];
 }
 

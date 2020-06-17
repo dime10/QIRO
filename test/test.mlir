@@ -30,19 +30,19 @@ module {
     // test register operations (extracting qubit, slicing register, combining to register)
     %4 = "q.extract"(%2) {idx=2} : (!q.qureg<4>) -> !q.qubit
     %5 =  q.extract %2[2] : (!q.qureg<4>) -> !q.qubit
-    //%12 = q.extract %2[4] : (!q.qureg<4>) -> !q.qubit
+    //q.extract %2[4] : (!q.qureg<4>) -> !q.qubit
 
     %6 = "q.slice"(%2) {a=1, b=4} : (!q.qureg<4>) -> !q.qureg<3>
     %7 =  q.slice %2[1, 4] : (!q.qureg<4>) -> !q.qureg<3>
-    //%12 = q.slice %2[1,2] : (!q.qureg<4>) -> !q.qureg<1>
-    //%12 = q.slice %2[3,5] : (!q.qureg<4>) -> !q.qureg<2>
-    //%12 = q.slice %2[1,3] : (!q.qureg<4>) -> !q.qureg<1>
+    //q.slice %2[1,2] : (!q.qureg<4>) -> !q.qureg<1>
+    //q.slice %2[3,5] : (!q.qureg<4>) -> !q.qureg<2>
+    //q.slice %2[1,3] : (!q.qureg<4>) -> !q.qureg<1>
 
     %8 = "q.genreg"(%0, %2) : (!q.qubit, !q.qureg<4>) -> !q.qureg<5>
     %9 =  q.genreg %0, %2 : (!q.qubit, !q.qureg<4>) -> !q.qureg<5>
     %10 = "q.genreg"(%0, %2, %1) : (!q.qubit, !q.qureg<4>, !q.qubit) -> !q.qureg<6>
     %11 =  q.genreg %0, %2, %1 : (!q.qubit, !q.qureg<4>, !q.qubit) -> !q.qureg<6>
-    //%12 = q.genreg %0, %2, %1 : (!q.qubit, !q.qureg<4>, !q.qubit) -> !q.qureg<8>
+    //q.genreg %0, %2, %1 : (!q.qubit, !q.qureg<4>, !q.qubit) -> !q.qureg<8>
 
     // create a small test circuit
     %qb0 = q.alloc : !q.qubit
@@ -51,7 +51,7 @@ module {
     %c0 = "q.circ"() ({
         q.H %qb0 : (!q.qubit) -> !q.op
         q.CX %qb1, %qb0 : (!q.qubit, !q.qubit) -> !q.cop<1>
-        q.bar : ()
+        q.term : ()
     }) : () -> !q.circ
 
     %c1 = q.circ {

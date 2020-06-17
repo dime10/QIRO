@@ -25,7 +25,7 @@ class Quantum_Op<string mnemonic, list<OpTrait> traits = []> :
 // Base class for all types in this dialect
 class Quantum_Type<string cppTypeName, string description> :
         DialectType<Quantum_Dialect, CPred<"$_self.isa<" # cppTypeName # ">()">, description>;
-// NOTE: Use DialectType instead of Dialect, otherwise ODS will not declare parse/print functions.
+// NOTE: Use DialectType instead of Type, otherwise ODS will not declare parse/print functions.
 
 // Provide definitions for the custom data types to ODS
 def Qubit_Type : Quantum_Type<"QubitType", "Quantum qubit type">;
@@ -43,5 +43,6 @@ def QOp_Type : AnyTypeOf<[Op_Type, ControlledOp_Type, Circuit_Type]>;
 // Define new dialect traits
 def Unitary : NativeOpTrait<"UnitaryTrait">;
 def Hermitian : NativeOpTrait<"HermitianTrait">;
- 
+def ImplicitQuantumTerminator : SingleBlockImplicitTerminator<"TerminatorOp">;
+
 #endif // QUANTUM_DIALECT
