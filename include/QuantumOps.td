@@ -447,7 +447,8 @@ def CircuitOp : Quantum_Op<"circ", [Unitary, ImplicitQuantumTerminator]> {
         always considered "on hold" when defined, and thus always returns the op
         type 'circ'. Note that all qubits used within the circuit are final and
         must be defined in an enclosing scope, that is, the circuit cannot be
-        reapplied to a different set of qubits.
+        reapplied to a different set of qubits. See 'ParametricCircuitOp' for this
+        functionality.
 
         Since the circuit body consists of a block, it must always be terminated
         with the special 'TerminatorOp'. In custom assembly form this can be omitted.
@@ -481,6 +482,45 @@ def CircuitOp : Quantum_Op<"circ", [Unitary, ImplicitQuantumTerminator]> {
 
     let printer = [{ return ::print(p, *this); }];
     let parser = [{ return ::parse$cppClass(parser, result); }];
+}
+
+def ParametricCircuitOp : Quantum_Op<"parcirc"> {
+    let summary = "Instatiate a parametric quantum circuit.";
+    let description = [{
+        In contrast to a basic circuit, a parametric circuit is created with the
+        help of a function. The function contains the body of the circuit and takes
+        the circuit parameters and acted-upon qubits as inputs. This op then takes
+        the function name and parameters and instatiates a circuit op that can be
+        further operated on by meta ops or used with the application op.
+
+        ```mlir
+        func @fun(%n : index, %qbs : !q.qureg<4>) -> () {
+            %q = "q.extract"(%qbs) {idx=0} : (!q.qureg<4>) -> !q.qubit
+            "q.H"(%q) : (!q.qubit) -> ()
+            "q.term"() : () -> ()
+        }
+
+        %n = constant 4 : index
+        %0 = "q.allocreg"() {size=4} : () -> !q.qureg<4>
+        %pc = "q.parcirc"(%n, %2) {callee=@fun} : (index, !q.qureg<4>) -> !q.circ
+        // OR in custom assembly format
+        %pc = q.parcirc @fun(%n, %2) : (index, !q.qureg<4>) -> !q.circ
+        ```
+    }];
+
+    let arguments = (ins
+        FlatSymbolRefAttr : $callee,
+        Index : $n,
+        Qureg_Type : $qbs
+    );
+
+    let results = (outs
+        Circuit_Type
+    );
+
+    let assemblyFormat = [{
+        $callee `(` $n `,` $qbs `)` attr-dict `:` `(` type($n) `,` type($qbs) `)` `->` type(results)
+    }];
 }
 
 def ApplyCircOp : Quantum_Op<"apply"> {

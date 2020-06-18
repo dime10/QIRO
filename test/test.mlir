@@ -71,6 +71,16 @@ module {
         q.CX %1, %0 : (!q.qubit, !q.qubit) -> ()
     } : !q.circ
 
+    // test a parametrized circuit
+    func @fun(%dummy : index, %qbs : !q.qureg<4>) {
+        q.H %qbs : (!q.qureg<4>) -> ()
+        q.term
+    }
+    %param = constant 4 : index
+
+    %pc0 = "q.parcirc"(%param, %2) {callee=@fun} : (index, !q.qureg<4>) -> !q.circ
+    %pc1 = q.parcirc @fun(%param, %2) : (index, !q.qureg<4>) -> !q.circ
+
     // test control meta operation, including on: ops, cops, and circs//, test variadic input
     "q.c"(%op0, %1, %0) : (!q.op, !q.qubit, !q.qubit) -> ()
     q.c %op0, %1, %0 : (!q.op, !q.qubit, !q.qubit) -> ()
