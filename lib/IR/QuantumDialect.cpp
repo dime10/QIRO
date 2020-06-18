@@ -186,6 +186,11 @@ mlir::Type QuantumDialect::parseType(mlir::DialectAsmParser &parser) const {
 //===------------------------------------------------------------------------------------------===//
 static void print(OpAsmPrinter &p, CircuitOp op) {
     p << op.getOperationName();
+    if (op.getAttr("name")) {
+        p << "(";
+        p.printAttributeWithoutType(op.nameAttr());
+        p << ")";
+    }
     p.printRegion(op.gates(), /*printEntryBlockArgs=*/false, /*printBlockTerminators=*/false);
     p.printOptionalAttrDict(op.getAttrs(), /*elidedAttrs=*/{});
     p << " : " << op.getType();
@@ -193,6 +198,15 @@ static void print(OpAsmPrinter &p, CircuitOp op) {
 
 static ParseResult parseCircuitOp(OpAsmParser &p, OperationState &result) {
     auto &builder = p.getBuilder();
+
+    // parse optional 'name' attribute as "function argument"
+    if (succeeded(p.parseOptionalLParen())) {
+        StringAttr nameAttr;
+        if (p.parseAttribute(nameAttr, "name", result.attributes))
+            return failure();
+        if (p.parseRParen())
+            return failure();
+    }
 
     // Parse the body region.
     Region *body = result.addRegion();

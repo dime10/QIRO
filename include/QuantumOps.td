@@ -440,12 +440,17 @@ def TerminatorOp : Quantum_Op<"term", [Terminator]> {
 def CircuitOp : Quantum_Op<"circ", [Unitary, ImplicitQuantumTerminator]> {
     let summary = "Create a basic quantum circuit.";
     let description = [{
-        A basic quantum circuit is a simple block regrouping multiple gates.
-        No control flow is allowed within such a block. However, these operations
-        can then be repeated, inverted or controlled as as single unit.
+        A basic quantum circuit is a block regrouping multiple gates. No control
+        flow is allowed within such a block. However, these operations can then be
+        repeated, inverted, or controlled as as single unit. Note that contrary to
+        ops of type 'Quantum_Gate' (basic gates & meta ops), a basic circuit is
+        always considered "on hold" when defined, and thus always returns the op
+        type 'circ'. Note that all qubits used within the circuit are final and
+        must be defined in an enclosing scope, that is, the circuit cannot be
+        reapplied to a different set of qubits.
 
-        Note that the gates are grouped within a block, which must be terminated
-        with the special 'Barrier' operation.
+        Since the circuit body consists of a block, it must always be terminated
+        with the special 'TerminatorOp'. In custom assembly form this can be omitted.
 
         Example:
 
@@ -462,6 +467,10 @@ def CircuitOp : Quantum_Op<"circ", [Unitary, ImplicitQuantumTerminator]> {
         ```
     }];
 
+    let arguments = (ins
+        OptionalAttr<StrAttr> : $name
+    );
+
     let results = (outs
         Circuit_Type
     );
@@ -472,6 +481,44 @@ def CircuitOp : Quantum_Op<"circ", [Unitary, ImplicitQuantumTerminator]> {
 
     let printer = [{ return ::print(p, *this); }];
     let parser = [{ return ::parse$cppClass(parser, result); }];
+}
+
+def ApplyCircOp : Quantum_Op<"apply"> {
+    let summary = "Apply circuit to quantum computer.";
+    let description = [{
+        This operation is solely meant to perform the application of a circuit
+        op or ops derived from a circuit op as these are always on hold when
+        created and remain that way when passed to meta-ops. It is not compatible
+        with other operations on hold as those require target qubits as arguments
+        in order to perform application.
+
+        Example:
+
+        ```mlir
+        %0 = "q.alloc"() : () -> !q.qubit
+        %1 = "q.alloc"() : () -> !q.qubit
+        %c = "q.circ"() ({
+            "q.H"(%0) : (!q.qubit) -> ()
+            "q.CX"(%1, %0) : (!q.qubit, !q.qubit) -> ()
+            "q.bar"() : () -> ()
+        }) : () -> !q.circ
+        // Apply circuit 4 times
+        affine.for %i = 0 to 4 {
+            "q.apply"(%c) : (!q.circ) -> ()
+        }
+        // OR in custom assembly
+        affine.for %i = 0 to 4 {
+            q.apply %c : (!q.circ) -> ()
+        }
+    }];
+
+    let arguments = (ins
+        QOp_Type
+    );
+
+    let assemblyFormat = [{
+        operands attr-dict `:` functional-type(operands, results)
+    }];
 }
 
 def ControlOp : Quantum_Gate<"c", [Meta]> {
@@ -542,6 +589,9 @@ def ControlOp : Quantum_Gate<"c", [Meta]> {
         // assert that this matches the output type
         if (this->op() && this->op().getType().cast<COpType>().getNumCtrls() != totalctrls)
             return this->emitError() << "Number of output controls doesn't match inputs!";
+
+        if (this->heldOp().getType().isa<CircType>() && this->qbs())
+            return this->emitError() << "Circuit cannot be applied by specifying qubits!";
     }];
 
     let assemblyFormat = [{
@@ -590,6 +640,9 @@ def AdjointOp : Quantum_Gate<"adj", [Meta]> {
     let additionalVerifier = [{
         if (this->op() && this->heldOp().getType() != this->op().getType())
             return this->emitError() << "Input op type must match output op type!";
+
+        if (this->heldOp().getType().isa<CircType>() && this->qbs())
+            return this->emitError() << "Circuit cannot be applied by specifying qubits!";
     }];
 
     let assemblyFormat = [{

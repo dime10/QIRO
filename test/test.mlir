@@ -55,13 +55,18 @@ module {
     %op7 = q.CX %0 : (!q.qubit) -> !q.cop<1>
 
     // create a small test circuit
-    %circ = "q.circ"() ({
+    %circ0 = "q.circ"() ({
         q.H %0 : (!q.qubit) -> ()
         q.CX %1, %0 : (!q.qubit, !q.qubit) -> ()
         q.term
-    }) : () -> !q.circ
+    }) {name="test"} : () -> !q.circ
 
-    q.circ {
+    %circ1 = q.circ("test") {
+        q.H %0 : (!q.qubit) -> ()
+        q.CX %1, %0 : (!q.qubit, !q.qubit) -> ()
+    } : !q.circ
+
+    %circ2 = q.circ {
         q.H %0 : (!q.qubit) -> ()
         q.CX %1, %0 : (!q.qubit, !q.qubit) -> ()
     } : !q.circ
@@ -75,15 +80,14 @@ module {
     q.c %op0, %2, %0 : (!q.op, !q.qureg<4>, !q.qubit) -> ()
     "q.c"(%op6, %1, %0) : (!q.cop<1>, !q.qubit, !q.qubit) -> ()
     q.c %op6, %1, %0 : (!q.cop<1>, !q.qubit, !q.qubit) -> ()
-    "q.c"(%circ, %1, %0) : (!q.circ, !q.qubit, !q.qubit) -> ()
-    q.c %circ, %1, %0 : (!q.circ, !q.qubit, !q.qubit) -> ()
+    //q.c %circ0, %1, %0 : (!q.circ, !q.qubit, !q.qubit) -> () // can't apply circ by passing qubits
 
     %cop0 = "q.c"(%op0, %0) : (!q.op, !q.qubit) -> !q.cop<1>
     %cop1 = q.c %op0, %0 : (!q.op, !q.qubit) -> !q.cop<1>
     %ccop0 = "q.c"(%cop0, %2) : (!q.cop<1>, !q.qureg<4>) -> !q.cop<5>
     %ccop1 =  q.c %cop0, %2 : (!q.cop<1>, !q.qureg<4>) -> !q.cop<5>
-    %ccirc0 = "q.c"(%circ, %0) : (!q.circ, !q.qubit) -> !q.cop<1>
-    %ccirc1 =  q.c %circ, %0 : (!q.circ, !q.qubit) -> !q.cop<1>
+    %ccirc0 = "q.c"(%circ0, %0) : (!q.circ, !q.qubit) -> !q.cop<1>
+    %ccirc1 =  q.c %circ0, %0 : (!q.circ, !q.qubit) -> !q.cop<1>
     //q.c %op0, %2 : (!q.op, !q.qureg<4>) -> !q.cop<5>
     //q.c %ccop0, %2 : (!q.cop<5>, !q.qureg<4>) -> !q.cop<3>
 
@@ -92,9 +96,20 @@ module {
     q.adj %op0, %0 : (!q.op, !q.qubit) -> ()
     "q.adj"(%cop0, %0) : (!q.cop<1>, !q.qubit) -> ()
     q.adj %cop0, %0 : (!q.cop<1>, !q.qubit) -> ()
-    "q.adj"(%circ) : (!q.circ) -> !q.circ // fix the circuit cases
-    q.adj %circ : (!q.circ) -> !q.circ // fix the circuit cases
     %aop0 = "q.adj"(%op0) : (!q.op) -> !q.op
     %aop1 = q.adj %op0 : (!q.op) -> !q.op
-    //q.adj %op0 : (!q.op) -> !q.cop<1>
+    %acirc0 = "q.adj"(%circ0) : (!q.circ) -> !q.circ
+    %acirc1 = q.adj %circ0 : (!q.circ) -> !q.circ
+    %acop0 = "q.adj"(%cop0) : (!q.cop<1>) -> !q.cop<1>
+    %acop1 = q.adj %cop0 : (!q.cop<1>) -> !q.cop<1>
+    //q.adj %op0 : (!q.op) -> !q.cop<1>             // input and output must be the same type
+    //q.adj %circ0, %0 : (!q.circ0, !q.qubit) -> () // circuits cannot be applied by specifying qubits
+
+    // test circuit application
+    "q.apply"(%circ0) : (!q.circ) -> ()
+    q.apply %circ0 : (!q.circ) -> ()
+    "q.apply"(%ccirc0) : (!q.cop<1>) -> ()
+    q.apply %ccirc0 : (!q.cop<1>) -> ()
+    "q.apply"(%acirc0) : (!q.circ) -> ()
+    q.apply %acirc0 : (!q.circ) -> ()
 }
