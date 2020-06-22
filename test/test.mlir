@@ -19,15 +19,15 @@ module {
 
     %6 = "q.slice"(%2) {a=1, b=4} : (!q.qureg<4>) -> !q.qureg<3>
     %7 =  q.slice %2[1, 4] : (!q.qureg<4>) -> !q.qureg<3>
-    //q.slice %2[1,2] : (!q.qureg<4>) -> !q.qureg<1>
-    //q.slice %2[3,5] : (!q.qureg<4>) -> !q.qureg<2>
-    //q.slice %2[1,3] : (!q.qureg<4>) -> !q.qureg<1>
+    //q.slice %2[1,2] : (!q.qureg<4>) -> !q.qureg<2> // range too small (min 2)
+    //q.slice %2[3,5] : (!q.qureg<4>) -> !q.qureg<2> // range out of bounds
+    //q.slice %2[1,3] : (!q.qureg<4>) -> !q.qureg<3> // range - type mismatch
 
     %8 = "q.genreg"(%0, %2) : (!q.qubit, !q.qureg<4>) -> !q.qureg<5>
     %9 =  q.genreg %0, %2 : (!q.qubit, !q.qureg<4>) -> !q.qureg<5>
     %10 = "q.genreg"(%0, %2, %1) : (!q.qubit, !q.qureg<4>, !q.qubit) -> !q.qureg<6>
     %11 =  q.genreg %0, %2, %1 : (!q.qubit, !q.qureg<4>, !q.qubit) -> !q.qureg<6>
-    //q.genreg %0, %2, %1 : (!q.qubit, !q.qureg<4>, !q.qubit) -> !q.qureg<8>
+    //q.genreg %0, %2, %1 : (!q.qubit, !q.qureg<4>, !q.qubit) -> !q.qureg<8> // qubit num mismatch
     func @testgenreg(%l : !q.qlist, %r : !q.qureg<4>) {
         %22 = "q.genreg"(%l) : (!q.qlist) -> !q.qureg<7>
         %23 = q.genreg %l : (!q.qlist) -> !q.qureg<7>
@@ -42,8 +42,8 @@ module {
     q.H %2 : (!q.qureg<4>) -> ()
     %op0 = "q.H"() : () -> !q.op
     %op1 = q.H : () -> !q.op
-    //"q.H"(%0) : (!q.qubit) -> !q.op
-    //"q.H"() : () -> ()
+    //"q.H"(%0) : (!q.qubit) -> !q.op // cannot pass target and get op result
+    //"q.H"() : () -> ()              // must pass either target or op result
 
     "q.X"(%0) : (!q.qubit) -> ()
     q.X %0 : (!q.qubit) -> ()
@@ -123,8 +123,8 @@ module {
     %ccop1 =  q.c %cop0, %2 : (!q.cop<1>, !q.qureg<4>) -> !q.cop<5>
     %ccirc0 = "q.c"(%circ0, %0) : (!q.circ, !q.qubit) -> !q.cop<1>
     %ccirc1 =  q.c %circ0, %0 : (!q.circ, !q.qubit) -> !q.cop<1>
-    //q.c %op0, %2 : (!q.op, !q.qureg<4>) -> !q.cop<5>
-    //q.c %ccop0, %2 : (!q.cop<5>, !q.qureg<4>) -> !q.cop<3>
+    //q.c %op0, %2 : (!q.op, !q.qureg<4>) -> !q.cop<5>       // num controls mismatch
+    //q.c %ccop0, %2 : (!q.cop<5>, !q.qureg<4>) -> !q.cop<3> // num combined controls mismatch
 
     // test adjoint meta operation
     "q.adj"(%op0, %0) : (!q.op, !q.qubit) -> ()
@@ -138,7 +138,7 @@ module {
     %acop0 = "q.adj"(%cop0) : (!q.cop<1>) -> !q.cop<1>
     %acop1 = q.adj %cop0 : (!q.cop<1>) -> !q.cop<1>
     //q.adj %op0 : (!q.op) -> !q.cop<1>             // input and output must be the same type
-    //q.adj %circ0, %0 : (!q.circ0, !q.qubit) -> () // circuits cannot be applied by specifying qubits
+    //q.adj %circ0, %0 : (!q.circ0, !q.qubit) -> () // circ can't be applied by specifying qubits
 
     // test circuit application
     "q.apply"(%circ0) : (!q.circ) -> ()

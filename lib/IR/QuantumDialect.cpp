@@ -73,11 +73,14 @@ struct COpTypeStorage : public mlir::TypeStorage {
 } // end namespace quantum
 } // end namespace mlir
 
-/* Methods of complex types must be implemented after their TypeStorage has been defined */
+
+//===------------------------------------------------------------------------------------------===//
+// Method implementations of complex types
+//===------------------------------------------------------------------------------------------===//
 
 // Qureg
 QuregType QuregType::get(mlir::MLIRContext *ctx, unsigned size) {
-    assert((size > 0) && "Qureg size must be > 0");
+    assert((size > 1) && "Qureg size must be > 1");
 
     // Parameters to the storage class are passed after the custom type kind.
     return Base::get(ctx, QuantumTypes::Qureg, size);
@@ -101,8 +104,10 @@ unsigned COpType::getNumCtrls() {
     return getImpl()->nctrl;
 }
 
-/* Finally, to be able to read and output .mlir code (roundtrip) from this dialect
-   with our custom types, we need to overwrite the printType and parseType hooks. */
+
+//===------------------------------------------------------------------------------------------===//
+// Dialect types printing and parsing
+//===------------------------------------------------------------------------------------------===//
 
 // Print an instance of a type registered in the Quantum dialect.
 void QuantumDialect::printType(mlir::Type type, mlir::DialectAsmPrinter &printer) const {
@@ -182,13 +187,15 @@ mlir::Type QuantumDialect::parseType(mlir::DialectAsmParser &parser) const {
     if (keyword == "circ")
         return CircType::get(this->getContext());
 
-    parser.emitError(parser.getNameLoc(), "unrecognized quantum type");
+    parser.emitError(parser.getNameLoc(), "Unrecognized quantum type!");
     return Type();
 }
+
 
 //===------------------------------------------------------------------------------------------===//
 // Custom CircuitOp assembly format
 //===------------------------------------------------------------------------------------------===//
+
 static void print(OpAsmPrinter &p, CircuitOp op) {
     p << op.getOperationName();
     if (op.getAttr("name")) {

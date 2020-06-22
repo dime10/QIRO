@@ -245,6 +245,10 @@ def GenRegOp : Quantum_Op<"genreg", [NoSideEffect]> {
                 totalqbs += xtype.cast<QuregType>().getNumQubits();
         }
 
+        // a register needs at least 2 qubits
+        if (totalqbs < 2)
+            return this->emitError() << "A register is composed of at least 2 qubits!";
+
         // assert that this matches the output type
         unsigned declsize = this->newreg().getType().cast<QuregType>().getNumQubits();
         if (declsize != totalqbs)

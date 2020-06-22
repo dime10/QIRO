@@ -60,9 +60,7 @@ public:
 
     // This is used to get an instance of the 'QubitType'. Given that this is
     // a parameterless type, it just needs the context for uniquing purposes.
-    static QubitType get(mlir::MLIRContext *ctx) {
-        return Base::get(ctx, QuantumTypes::Qubit);
-    }
+    static QubitType get(mlir::MLIRContext *ctx) { return Base::get(ctx, QuantumTypes::Qubit); }
 };
 
 // This class represents a register of qubits, with a minimum of one qubit. For such a
