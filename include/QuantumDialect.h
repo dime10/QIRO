@@ -37,6 +37,7 @@ namespace QuantumTypes {
 enum Kinds {
     Qubit = mlir::Type::Kind::FIRST_PRIVATE_EXPERIMENTAL_0_TYPE,
     Qureg,
+    Qlist,
     Op,
     COp,
     Circ
@@ -79,6 +80,14 @@ public:
 
     // Return the register size
     unsigned getNumQubits();
+};
+
+// This class represents a quantum register with undeclared size, for use with parametric circuits.
+class QlistType : public Type::TypeBase<QlistType, mlir::Type> {
+public:
+    using Base::Base;
+    static bool kindof(unsigned kind) { return kind == QuantumTypes::Qlist; }
+    static QlistType get(mlir::MLIRContext *ctx) { return Base::get(ctx, QuantumTypes::Qlist); }
 };
 
 // This class represents a singular quantum operation (such as a gate).

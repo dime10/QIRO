@@ -103,7 +103,7 @@ def ExtractOp : Quantum_Op<"extract", [NoSideEffect]> {
     }];
 
     let arguments = (ins
-        Qureg_Type : $reg,
+        AnyTypeOf<[Qureg_Type, Qlist_Type]> : $reg,
         Confined<APIntAttr, [IntNonNegative]> : $idx
     );
 
@@ -113,6 +113,13 @@ def ExtractOp : Quantum_Op<"extract", [NoSideEffect]> {
 
     let verifier = [{
         llvm::APInt idx = this->idx();
+        if (this->reg().getType().isa<QlistType>()) {
+            if (idx != 0)
+                return this->emitError() << "Usage on Qlist restricted to a cast where the "
+                                            "underlying type is a Qubit, thus idx must = 0!";
+            return success();
+        }
+
         unsigned regsize = this->reg().getType().cast<QuregType>().getNumQubits();
 
         if (idx.uge(regsize))
@@ -204,8 +211,7 @@ def GenRegOp : Quantum_Op<"genreg", [NoSideEffect]> {
     }];
 
     let arguments = (ins
-        QData_Type : $input1,
-        QData_Type : $input2,
+        QDataX_Type : $input1,
         Variadic<QData_Type> : $extrainputs
     );
 
@@ -214,16 +220,17 @@ def GenRegOp : Quantum_Op<"genreg", [NoSideEffect]> {
     );
 
     let verifier = [{
+        if (this->input1().getType().isa<QlistType>()) {
+            if (this->extrainputs().size())
+                this->emitError() << "Usage on Qlist reserved for cast to Qureg, "
+                                     "thus no additional inputs are allowed!";
+            return success();
+        }
+
         // obtain total number of qubits from input
         unsigned totalqbs = 0;
 
         auto qbtype = this->input1().getType();
-        if (qbtype.isa<QubitType>())
-            totalqbs++;
-        else if (qbtype.isa<QuregType>())
-            totalqbs += qbtype.cast<QuregType>().getNumQubits();
-
-        qbtype = this->input2().getType();
         if (qbtype.isa<QubitType>())
             totalqbs++;
         else if (qbtype.isa<QuregType>())

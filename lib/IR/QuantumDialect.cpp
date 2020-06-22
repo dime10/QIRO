@@ -18,7 +18,7 @@ QuantumDialect::QuantumDialect(mlir::MLIRContext *ctx) : mlir::Dialect("q", ctx)
         #include "QuantumOps.cpp.inc"
     >();
     
-    addTypes<QubitType, QuregType, OpType, COpType, CircType>();  // in mlir::quantum
+    addTypes<QubitType, QuregType, QlistType, OpType, COpType, CircType>();  // in mlir::quantum
 
     // addAttributes<QuantumAttribute>();
     // addInterfaces<QuantumInterface>();
@@ -116,6 +116,9 @@ void QuantumDialect::printType(mlir::Type type, mlir::DialectAsmPrinter &printer
         printer << "qureg<" << ctype.getNumQubits() << ">";
         break;
     }
+    case QuantumTypes::Qlist:
+        printer << "qlist";
+        break;
     case QuantumTypes::Op:
         printer << "op";
         break;
@@ -159,6 +162,8 @@ mlir::Type QuantumDialect::parseType(mlir::DialectAsmParser &parser) const {
         }
         return QuregType::get(this->getContext(), size);
     }
+    if (keyword == "qlist")
+        return QlistType::get(this->getContext());
     if (keyword == "op")
         return OpType::get(this->getContext());
     if (keyword == "cop") {

@@ -10,6 +10,12 @@ module {
     %4 = "q.extract"(%2) {idx=2} : (!q.qureg<4>) -> !q.qubit
     %5 =  q.extract %2[2] : (!q.qureg<4>) -> !q.qubit
     //q.extract %2[4] : (!q.qureg<4>) -> !q.qubit
+    func @testextract(%l : !q.qlist) {
+        %20 = "q.extract"(%l) {idx=0} : (!q.qlist) -> !q.qubit
+        %21 = q.extract %l[0] : (!q.qlist) -> !q.qubit
+        //q.extract %l[1] : (!q.qlist) -> !q.qubit // qlist: only idx=0 allowed
+        q.term
+    }
 
     %6 = "q.slice"(%2) {a=1, b=4} : (!q.qureg<4>) -> !q.qureg<3>
     %7 =  q.slice %2[1, 4] : (!q.qureg<4>) -> !q.qureg<3>
@@ -22,6 +28,12 @@ module {
     %10 = "q.genreg"(%0, %2, %1) : (!q.qubit, !q.qureg<4>, !q.qubit) -> !q.qureg<6>
     %11 =  q.genreg %0, %2, %1 : (!q.qubit, !q.qureg<4>, !q.qubit) -> !q.qureg<6>
     //q.genreg %0, %2, %1 : (!q.qubit, !q.qureg<4>, !q.qubit) -> !q.qureg<8>
+    func @testgenreg(%l : !q.qlist, %r : !q.qureg<4>) {
+        %22 = "q.genreg"(%l) : (!q.qlist) -> !q.qureg<7>
+        %23 = q.genreg %l : (!q.qlist) -> !q.qureg<7>
+        //q.genreg %l, %r : (!q.qlist, !q.qureg<4>) -> !q.qureg<7> // qlist: only 1 operand allowed
+        q.term
+    }
 
     // test basic gates, including their custom assembly formats
     "q.H"(%0) : (!q.qubit) -> ()
