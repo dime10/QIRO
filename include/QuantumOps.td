@@ -3,6 +3,7 @@
 
 include "QuantumDialect.td"
 include "mlir/Interfaces/SideEffectInterfaces.td"
+include "mlir/Interfaces/CallInterfaces.td"
 
 // Base class for "gates", i.e. operations executable on a quantum computer
 class Quantum_Gate<string mnemonic, list<OpTrait> traits = []> : Quantum_Op<mnemonic, traits> {
@@ -491,14 +492,15 @@ def CircuitOp : Quantum_Op<"circ", [Unitary, ImplicitQuantumTerminator]> {
     let parser = [{ return ::parse$cppClass(parser, result); }];
 }
 
-def ParametricCircuitOp : Quantum_Op<"parcirc"> {
+def ParametricCircuitOp : Quantum_Op<"parcirc", [DeclareOpInterfaceMethods<CallOpInterface>]> {
     let summary = "Instatiate a parametric quantum circuit.";
     let description = [{
         In contrast to a basic circuit, a parametric circuit is created with the
-        help of a function. The function contains the body of the circuit and takes
-        the circuit parameters and acted-upon qubits as inputs. This op then takes
-        the function name and parameters and instatiates a circuit op that can be
-        further operated on by meta ops or used with the application op.
+        help of a function. The function contains the body of the circuit and must
+        take a non-negative circuit size parameter and a variadic list of acted-upon
+        qubits/regiters as input. This op then takes the function name and arguments
+        and instatiates a circuit op that can be further operated on by meta ops or
+        used with the application op.
 
         ```mlir
         func @fun(%n : index, %qbs : !q.qureg<4>) -> () {
@@ -509,24 +511,88 @@ def ParametricCircuitOp : Quantum_Op<"parcirc"> {
 
         %n = constant 4 : index
         %0 = "q.allocreg"() {size=4} : () -> !q.qureg<4>
-        %pc = "q.parcirc"(%n, %2) {callee=@fun} : (index, !q.qureg<4>) -> !q.circ
+        %pc = "q.parcirc"(%n, %0) {callee=@fun} : (index, !q.qureg<4>) -> !q.circ
         // OR in custom assembly format
-        %pc = q.parcirc @fun(%n, %2) : (index, !q.qureg<4>) -> !q.circ
+        %pc = q.parcirc @fun(%n, %0) : (index, !q.qureg<4>) -> !q.circ
         ```
     }];
 
     let arguments = (ins
         FlatSymbolRefAttr : $callee,
-        Index : $n,
-        Qureg_Type : $qbs
+        Confined<APIntAttr, [IntNonNegative]> : $n,
+        Variadic<QData_Type> : $qbs
     );
 
     let results = (outs
         Circuit_Type
     );
 
+    let verifier = [{
+        // obtain total number of qubits from qbs
+        unsigned totalqbs = 0;
+
+        auto qbstypes = this->qbs().getTypes();
+        for (auto type : qbstypes) {
+            if (type.isa<QubitType>())
+                totalqbs++;
+            else if (type.isa<QuregType>())
+                totalqbs += type.cast<QuregType>().getNumQubits();
+        }
+
+        if (this->n().ugt(totalqbs))
+            this->emitError() << "Supplied insufficient qubits for size parameter n!";
+
+        // make sure the function exists
+        auto funptr = this->resolveCallable();
+        if (!funptr)
+            this->emitError() << "The given function could not be resolved!";
+
+        // make sure function arguments match
+        auto typeattr = funptr->getAttrDictionary().get("type").dyn_cast<TypeAttr>();
+        auto funtype = typeattr.getValue().dyn_cast<FunctionType>();
+
+        // compare number of arguments while ignoring parameter in function signature
+        if (funtype.getNumInputs()-1 != this->getNumOperands())
+            this->emitError() << "Given number of function arguments does not match!"
+                                 " Required: " << funtype.getNumInputs()-1 <<
+                                 ". Got: " << this->getNumOperands() << ".";
+
+        // compare each parameter type:
+        //  - a !q.qlist must match either !q.qubit or !q.qureg
+        //  - for all other types, they must match exactly
+        unsigned i = 0;
+        auto opargtypes = qbstypes.begin();
+        for (auto arg : funtype.getInputs()) {
+            if (i++ == 0) { continue; }     // skip circuit parameter (first in arg list)
+
+            auto giventype = *opargtypes++;
+            if (arg.isa<QlistType>()) {
+                if (!giventype.isa<QuregType>() && !giventype.isa<QubitType>())
+                    this->emitError() << "Function expects '!q.qlist' argument, which must be "
+                                         "instantiated with either a '!q.qubit' or '!q.qureg'. "
+                                         "Got: " << giventype << "!";
+            } else {
+                if (arg != giventype)
+                    this->emitError() << "Type " << giventype << " at index " << i-2 <<
+                                         " did not match function signature type " << arg << "!";
+            }
+        }
+
+        return success();
+    }];
+
+    let extraClassDeclaration = [{
+        Operation *resolveCallable() {
+            // If the callable isn't a value, lookup the symbol reference.
+            CallInterfaceCallable callable = this->getCallableForCallee();
+            if (auto symbolRef = callable.dyn_cast<SymbolRefAttr>())
+                return SymbolTable::lookupNearestSymbolFrom(*this, symbolRef);
+            return callable.get<Value>().getDefiningOp();
+        }
+    }];
+
     let assemblyFormat = [{
-        $callee `(` $n `,` $qbs `)` attr-dict `:` `(` type($n) `,` type($qbs) `)` `->` type(results)
+        $callee `(` $n `,` $qbs `)` attr-dict `:` functional-type(operands, results)
     }];
 }
 

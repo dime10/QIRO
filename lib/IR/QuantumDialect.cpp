@@ -244,5 +244,20 @@ static ParseResult parseCircuitOp(OpAsmParser &p, OperationState &result) {
     return success();
 }
 
+
+//===------------------------------------------------------------------------------------------===//
+// Additional Op methods implementations
+//===------------------------------------------------------------------------------------------===//
+
+// Return the callee, required by the call interface.
+CallInterfaceCallable ParametricCircuitOp::getCallableForCallee() {
+    return getAttrOfType<SymbolRefAttr>("callee");
+}
+
+// Get the arguments to the called function, required by the call interface.
+Operation::operand_range ParametricCircuitOp::getArgOperands() {
+    return qbs();
+}
+
 #define GET_OP_CLASSES
 #include "QuantumOps.cpp.inc"

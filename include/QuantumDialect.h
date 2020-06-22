@@ -6,6 +6,7 @@
 #include "mlir/IR/OpDefinition.h"
 #include "mlir/IR/StandardTypes.h"
 #include "mlir/Interfaces/SideEffectInterfaces.h"
+#include "mlir/Interfaces/CallInterfaces.h"
 
 namespace mlir {
 namespace OpTrait {

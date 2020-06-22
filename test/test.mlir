@@ -84,16 +84,29 @@ module {
     } : !q.circ
 
     // test a parametrized circuit
-    func @fun(%dummy : index, %qbs : !q.qureg<4>) {
-        q.H %qbs : (!q.qureg<4>) -> ()
+    func @fun(%dummy : index, %qbs : !q.qlist) {
+        %reg = q.genreg %qbs : (!q.qlist) -> !q.qureg<4>
+        q.H %reg : (!q.qureg<4>) -> ()
         q.term
     }
-    %param = constant 4 : index
+    func @fun2(%dummy : index, %qb : !q.qubit, %qbs : !q.qlist) {
+        %reg = q.genreg %qbs : (!q.qlist) -> !q.qureg<4>
+        q.RZ(0.1) %qb : (!q.qubit) -> ()
+        q.H %reg : (!q.qureg<4>) -> ()
+        q.term
+    }
+    %pc0 = "q.parcirc"(%0) {callee=@fun, n=1} : (!q.qubit) -> !q.circ
+    %pc1 = q.parcirc @fun(1, %0) : (!q.qubit) -> !q.circ
+    %pc2 = "q.parcirc"(%2) {callee=@fun, n=4} : (!q.qureg<4>) -> !q.circ
+    %pc3 = q.parcirc @fun(4, %2) : (!q.qureg<4>) -> !q.circ
+    %pc4 = "q.parcirc"(%0, %2) {callee=@fun2, n=5} : (!q.qubit, !q.qureg<4>) -> !q.circ
+    %pc5 = q.parcirc @fun2(5, %0, %2) : (!q.qubit, !q.qureg<4>) -> !q.circ
+    //q.parcirc @fun3(4, %2) : (!q.qureg<4>) -> !q.circ               // function doesn't exist
+    //q.parcirc @fun(4, %0, %2) : (!q.qubit, !q.qureg<4>) -> !q.circ  // too many arguments to func
+    //q.parcirc @fun2(2, %2, %0) : (!q.qureg<4>, !q.qubit) -> !q.circ // arguments don't match sig
+    //q.parcirc @fun(5, %2) : (!q.qureg<4>) -> !q.circ                // less than 'n' qubits given
 
-    %pc0 = "q.parcirc"(%param, %2) {callee=@fun} : (index, !q.qureg<4>) -> !q.circ
-    %pc1 = q.parcirc @fun(%param, %2) : (index, !q.qureg<4>) -> !q.circ
-
-    // test control meta operation, including on: ops, cops, and circs//, test variadic input
+    // test control meta operation, including on: ops, cops, and circs
     "q.c"(%op0, %1, %0) : (!q.op, !q.qubit, !q.qubit) -> ()
     q.c %op0, %1, %0 : (!q.op, !q.qubit, !q.qubit) -> ()
     "q.c"(%op0, %1, %2) : (!q.op, !q.qubit, !q.qureg<4>) -> ()
