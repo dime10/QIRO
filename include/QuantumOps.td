@@ -92,20 +92,30 @@ def ExtractOp : Quantum_Op<"extract", [NoSideEffect]> {
     let description = [{
         This op allows to get out individual qubits from a register.
         The register is passed as an argument, and the index as an attribute.
+        Also supports extraction from a Qlist, in conjuction with accepting
+        the index argument optionally as an ssa operand instead of attribute.
 
         Example:
 
         ```mlir
         %0 = "q.allocreg"() {size=4} : () -> !q.qureg<4>
         // Extract single qubit from register
-        %qb = "q.extract"(%0) {idx=2} : (!q.qureg<4>) -> !q.qubit
+        %qb = "q.extract"(%0) {idx=2 : index} : (!q.qureg<4>) -> !q.qubit
         // OR in custom assembly format
-        %qb = q.extract %0[2] : (!q.qureg<4>) -> !q.qubit
+        %qb = q.extract %0[[2]] : (!q.qureg<4>) -> !q.qubit
+        // Extract qubit from Qlist
+        func @foo(%l : !q.qlist) {
+            %c = constant 2 : index
+            %qb = "q.extract"(%l, %c) : (!q.qureg<4>, index) -> !q.qubit
+            // OR in custom assembly format
+            %qb = q.extract %l[%c] : (!q.qlist) -> !q.qubit
+        }
     }];
 
     let arguments = (ins
         AnyTypeOf<[Qureg_Type, Qlist_Type]> : $reg,
-        Confined<APIntAttr, [IntNonNegative]> : $idx
+        OptionalAttr<Confined<IndexAttr, [IntNonNegative]>> : $idxAttr,
+        Optional<Index> : $idxArg
     );
 
     let results = (outs
@@ -113,14 +123,19 @@ def ExtractOp : Quantum_Op<"extract", [NoSideEffect]> {
     );
 
     let verifier = [{
-        llvm::APInt idx = this->idx();
+        if (this->idxAttr() && this->idxArg())
+            this->emitError() << "Can supply index as either attribute or operand, but not both!";
+        if (!this->idxAttr() && !this->idxArg())
+            this->emitError() << "Must supply an index (either via attribute or operand)!";
+
         if (this->reg().getType().isa<QlistType>()) {
-            if (idx != 0)
-                return this->emitError() << "Usage on Qlist restricted to a cast where the "
-                                            "underlying type is a Qubit, thus idx must = 0!";
             return success();
+        } else {
+            if (this->idxArg())
+                this->emitError() << "Operand index only supported on Qlist type!";
         }
 
+        llvm::APInt idx = *(this->idxAttr());
         unsigned regsize = this->reg().getType().cast<QuregType>().getNumQubits();
 
         if (idx.uge(regsize))
@@ -132,7 +147,7 @@ def ExtractOp : Quantum_Op<"extract", [NoSideEffect]> {
     }];
 
     let assemblyFormat = [{
-        $reg `[` $idx `]` attr-dict `:` functional-type(operands, results)
+        $reg `[` (`[`$idxAttr^`]`)? ($idxArg^)? `]` attr-dict `:` functional-type(operands, results)
     }];
 }
 
