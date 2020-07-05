@@ -42,7 +42,7 @@ def AllocOp : Quantum_Op<"alloc"> {
         // Allocate single qubit
         %qb = "q.alloc"() : () -> !q.qubit
         // OR in custom assembly format
-        %qb = q.alloc : !q.qubit
+        %qb = q.alloc -> !q.qubit
         ```
     }];
 
@@ -51,7 +51,7 @@ def AllocOp : Quantum_Op<"alloc"> {
     );
 
     let assemblyFormat = [{
-        attr-dict `:` type($qb)
+        attr-dict `->` type($qb)
     }];
 }
 
@@ -70,7 +70,7 @@ def AllocRegOp : Quantum_Op<"allocreg"> {
         // Allocate qubit register
         %reg = "q.allocreg"() {size=4} : () -> !q.qureg<4>
         // OR in custom assembly format
-        %reg = q.allocreg(4) : !q.qureg<4>
+        %reg = q.allocreg(4) -> !q.qureg<4>
         ```
     }];
 
@@ -83,7 +83,7 @@ def AllocRegOp : Quantum_Op<"allocreg"> {
     );
 
     let assemblyFormat = [{
-        `(`$size`)` attr-dict `:` type($reg)
+        `(`$size`)` attr-dict `->` type($reg)
     }];
 }
 
@@ -102,13 +102,13 @@ def ExtractOp : Quantum_Op<"extract", [NoSideEffect]> {
         // Extract single qubit from register
         %qb = "q.extract"(%0) {idx=2 : index} : (!q.qureg<4>) -> !q.qubit
         // OR in custom assembly format
-        %qb = q.extract %0[[2]] : (!q.qureg<4>) -> !q.qubit
+        %qb = q.extract %0[[2]] : !q.qureg<4> -> !q.qubit
         // Extract qubit from Qlist
         func @foo(%l : !q.qlist) {
             %c = constant 2 : index
             %qb = "q.extract"(%l, %c) : (!q.qureg<4>, index) -> !q.qubit
             // OR in custom assembly format
-            %qb = q.extract %l[%c] : (!q.qlist) -> !q.qubit
+            %qb = q.extract %l[%c] : !q.qlist, index -> !q.qubit
         }
     }];
 
@@ -147,7 +147,7 @@ def ExtractOp : Quantum_Op<"extract", [NoSideEffect]> {
     }];
 
     let assemblyFormat = [{
-        $reg `[` (`[`$idxAttr^`]`)? ($idxArg^)? `]` attr-dict `:` functional-type(operands, results)
+        $reg `[` (`[`$idxAttr^`]`)? ($idxArg^)? `]` attr-dict `:` type(operands) `->` type(results)
     }];
 }
 
@@ -163,9 +163,9 @@ def SliceRegOp : Quantum_Op<"slice", [NoSideEffect]> {
         ```mlir
         %0 = "q.allocreg"() {size=4} : () -> !q.qureg<4>
         // Extract range of qubits from register
-        %reg = "q.extract"(%0) {a=1, b=4} : (!q.qureg<4>) -> !q.qureg<3>
+        %reg = "q.slice"(%0) {a=1, b=4} : (!q.qureg<4>) -> !q.qureg<3>
         // OR in custom assembly format
-        %reg = q.extract %0[1,4] : (!q.qureg<4>) -> !q.qureg<3>
+        %reg = q.slice %0[1,4] : !q.qureg<4> -> !q.qureg<3>
     }];
 
     let arguments = (ins
@@ -200,7 +200,7 @@ def SliceRegOp : Quantum_Op<"slice", [NoSideEffect]> {
     }];
 
     let assemblyFormat = [{
-        $reg `[` $a `,` $b `]` attr-dict `:` functional-type(operands, results)
+        $reg `[` $a `,` $b `]` attr-dict `:` type(operands) `->` type(results)
     }];
 }
 
@@ -222,7 +222,12 @@ def GenRegOp : Quantum_Op<"genreg", [NoSideEffect]> {
         // Generate new register from other qubits/registers
         %reg = "q.genreg"(%0, %1) : (!q.qubit, !q.qureg<2>) -> !q.qureg<3>
         // OR in custom assembly format
-        %reg = q.genreg %0, %1 : (!q.qubit, !q.qureg<2>) -> !q.qureg<3>
+        %reg = q.genreg %0, %1 : !q.qubit, !q.qureg<2> -> !q.qureg<3>
+        // Cast Qlist to fixed-sized Qureg
+        func @foo(%l : !q.qlist) {
+            %reg = "q.genreg"(%l) : (!q.qlist) -> !q.qureg<7>
+            // OR in custom assembly format
+            %reg = q.genreg %l : !q.qlist -> !q.qureg<7>
         ```
     }];
 
@@ -273,7 +278,7 @@ def GenRegOp : Quantum_Op<"genreg", [NoSideEffect]> {
     }];
 
     let assemblyFormat = [{
-        operands attr-dict `:` functional-type(operands, results)
+        operands attr-dict `:` type(operands) `->` type(results)
     }];
 }
 
@@ -298,10 +303,12 @@ def HOp : Quantum_Gate<"H", [Unitary, Hermitian]> {
         "q.H"(%0) : (!q.qubit) -> ()
         // Apply a Hadamard gate to each qubit in register %1
         "q.H"(%1) : (!q.qureg<4>) -> ()
+        // OR in custom assembly format
+        q.H %1 : !q.qureg<4>
         // Generate Hadamard op without application to qubits (to be manipulated via meta-ops)
         $op = "q.H"() : () -> !q.op
         // OR in custom assembly format
-        %op = q.H : () -> !q.op
+        %op = q.H -> !q.op
         ```
     }];
 
@@ -313,9 +320,8 @@ def HOp : Quantum_Gate<"H", [Unitary, Hermitian]> {
         Optional<Op_Type> : $op
     );
 
-    let assemblyFormat = [{
-        operands attr-dict `:` functional-type(operands, results)
-    }];
+    let printer = "return ::print(p, *this);";
+    let parser = "return ::prettyParseOp(parser, result);";
 }
 
 def XOp : Quantum_Gate<"X", [Unitary, Hermitian]> {
@@ -339,10 +345,12 @@ def XOp : Quantum_Gate<"X", [Unitary, Hermitian]> {
         "q.X"(%0) : (!q.qubit) -> ()
         // Apply a NOT gate to each qubit in register %1
         "q.X"(%1) : (!q.qureg<4>) -> ()
+        // OR in custom assembly format
+        q.X %1 : !q.qureg<4>
         // Generate NOT op without application to qubits (to be manipulated via meta-ops)
         $op = "q.X"() : () -> !q.op
         // OR in custom assembly format
-        %op = q.X : () -> !q.op
+        %op = q.X -> !q.op
         ```
     }];
 
@@ -354,9 +362,8 @@ def XOp : Quantum_Gate<"X", [Unitary, Hermitian]> {
         Optional<Op_Type> : $op
     );
 
-    let assemblyFormat = [{
-        operands attr-dict `:` functional-type(operands, results)
-    }];
+    let printer = "return ::print(p, *this);";
+    let parser = "return ::prettyParseOp(parser, result);";
 }
 
 def RzOp : Quantum_Gate<"RZ", [Unitary]> {
@@ -381,10 +388,12 @@ def RzOp : Quantum_Gate<"RZ", [Unitary]> {
         "q.RZ"(%0) {phi=0.1}: (!q.qubit) -> ()
         // Apply a z-rotation by angle 0.1 to each qubit in register %1
         "q.RZ"(%1) {phi=0.1} : (!q.qureg<4>) -> ()
+        // OR in custom assembly format
+        q.RZ(0.1) %1 : !q.qureg<4>
         // Generate RZ gate without application to qubits (to be manipulated via meta-ops)
         $op = "q.RZ"() {phi=0.1} : () -> !q.op
         // OR in custom assembly format
-        %op = q.RZ(0.1) : () -> !q.op
+        %op = q.RZ(0.1) -> !q.op
         ```
     }];
 
@@ -397,9 +406,8 @@ def RzOp : Quantum_Gate<"RZ", [Unitary]> {
         Optional<Op_Type> : $op
     );
 
-    let assemblyFormat = [{
-        `(` $phi `)` $qbs attr-dict `:` functional-type(operands, results)
-    }];
+    let printer = "return ::print(p, *this);";
+    let parser = "return ::prettyParseOp(parser, result, true);";
 }
 
 def CNotOp : Quantum_Gate<"CX", [Unitary, Hermitian]> {
@@ -429,25 +437,26 @@ def CNotOp : Quantum_Gate<"CX", [Unitary, Hermitian]> {
         "q.CX"(%1, %0) : (!q.qubit, !q.qubit) -> ()
         // Apply a CNOT with control %0 to each qubit in register %2
         "q.CX"(%2, %0) : (!q.qureg<4>, !q.qubit) -> ()
+        // OR in custom assembly format
+        q.CX %2, %0 : !q.qureg<4>, !q.qubit
         // Generate CNOT gate without application to qubits (to be manipulated via meta-ops)
         $op = "q.CX"(%0) : (!q.qubit) -> !q.cop<1>
         // OR in custom assembly format
-        $op = q.CX %0 : (!q.qubit) -> !q.cop<1>
+        $op = q.CX %0 : !q.qubit -> !q.cop<1>
         ```
     }];
 
     let arguments = (ins
         Optional<QData_Type> : $qbs,
-        Qubit_Type
+        Qubit_Type : $ctrl
     );
 
     let results = (outs
         Optional<ControlledOp_Type> : $op
     );
 
-    let assemblyFormat = [{
-        operands attr-dict `:` functional-type(operands, results)
-    }];
+    let printer = "return ::print(p, *this);";
+    let parser = "return ::prettyParseOp(parser, result);";
 }
 
 def TerminatorOp : Quantum_Op<"term", [Terminator]> {
@@ -490,8 +499,8 @@ def CircuitOp : Quantum_Op<"circ", [Unitary, ImplicitQuantumTerminator]> {
         }) : () -> !q.circ
         // OR in custom assembly
         %c = q.circ {
-            q.H %0 : (!q.qureg<3>) -> ()
-        } !q.circ
+            "q.H"(%0) : (!q.qureg<3>) -> ()
+        } -> !q.circ
         ```
     }];
 
@@ -507,8 +516,8 @@ def CircuitOp : Quantum_Op<"circ", [Unitary, ImplicitQuantumTerminator]> {
         SizedRegion<1> : $gates
     );
 
-    let printer = [{ return ::print(p, *this); }];
-    let parser = [{ return ::parse$cppClass(parser, result); }];
+    let printer = "return ::print(p, *this);";
+    let parser = "return ::parse$cppClass(parser, result);";
 }
 
 def ParametricCircuitOp : Quantum_Op<"parcirc", [DeclareOpInterfaceMethods<CallOpInterface>]> {
@@ -640,7 +649,7 @@ def ApplyCircOp : Quantum_Op<"apply"> {
         }
         // OR in custom assembly
         affine.for %i = 0 to 4 {
-            q.apply %c : (!q.circ) -> ()
+            q.apply %c : !q.circ
         }
     }];
 
@@ -649,7 +658,7 @@ def ApplyCircOp : Quantum_Op<"apply"> {
     );
 
     let assemblyFormat = [{
-        operands attr-dict `:` functional-type(operands, results)
+        operands attr-dict `:` type(operands)
     }];
 }
 
@@ -682,7 +691,7 @@ def ControlOp : Quantum_Gate<"c", [Meta]> {
         // Control H op on qubit %1 but leave application open
         %cop = "q.c"(%op, %1) : (!q.op, !q.qubit) -> !q.cop<1>
         // OR in custom assembly format
-        %cop = q.c %op, %1 : (!q.op, !q.qubit) -> !q.cop<1>
+        %cop = q.c %op, %1 : !q.op, !q.qubit -> !q.cop<1>
     }];
 
     let arguments = (ins
@@ -726,9 +735,8 @@ def ControlOp : Quantum_Gate<"c", [Meta]> {
             return this->emitError() << "Circuit cannot be applied by specifying qubits!";
     }];
 
-    let assemblyFormat = [{
-        operands attr-dict `:` functional-type(operands, results)
-    }];
+    let printer = "return ::print(p, *this);";
+    let parser = "return ::prettyParseOp(parser, result);";
 }
 
 def AdjointOp : Quantum_Gate<"adj", [Meta]> {
@@ -757,7 +765,7 @@ def AdjointOp : Quantum_Gate<"adj", [Meta]> {
         // Invert H op but leave application open
         %opdg = "q.adj"(%op) : (!q.op) -> !q.op
         // OR in custom assembly format
-        %opdg = q.adj %op : (!q.op) -> !q.op
+        %opdg = q.adj %op : !q.op -> !q.op
     }];
 
     let arguments = (ins
@@ -777,9 +785,8 @@ def AdjointOp : Quantum_Gate<"adj", [Meta]> {
             return this->emitError() << "Circuit cannot be applied by specifying qubits!";
     }];
 
-    let assemblyFormat = [{
-        operands attr-dict `:` functional-type(operands, results)
-    }];
+    let printer = "return ::print(p, *this);";
+    let parser = "return ::prettyParseOp(parser, result);";
 }
 
 #endif // QUANTUM_OPS

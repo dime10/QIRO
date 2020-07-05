@@ -17,7 +17,7 @@ QuantumDialect::QuantumDialect(mlir::MLIRContext *ctx) : mlir::Dialect("q", ctx)
         #define GET_OP_LIST
         #include "QuantumOps.cpp.inc"
     >();
-    
+
     addTypes<QubitType, QuregType, QlistType, OpType, COpType, CircType>();  // in mlir::quantum
 
     // addAttributes<QuantumAttribute>();
@@ -138,7 +138,7 @@ void QuantumDialect::printType(mlir::Type type, mlir::DialectAsmPrinter &printer
     default:
         throw "unrecognized type encountered in the printer!";
     }
-} 
+}
 
 // Parse an instance of a type registered to the Quantum dialect.
 mlir::Type QuantumDialect::parseType(mlir::DialectAsmParser &parser) const {
@@ -204,8 +204,8 @@ static void print(OpAsmPrinter &p, CircuitOp op) {
         p << ")";
     }
     p.printRegion(op.gates(), /*printEntryBlockArgs=*/false, /*printBlockTerminators=*/false);
-    p.printOptionalAttrDict(op.getAttrs(), /*elidedAttrs=*/{});
-    p << " : " << op.getType();
+    p.printOptionalAttrDict(op.getAttrs(), /*elidedAttrs=*/{"name"});
+    p << " -> " << op.getType();
 }
 
 static ParseResult parseCircuitOp(OpAsmParser &p, OperationState &result) {
@@ -234,7 +234,7 @@ static ParseResult parseCircuitOp(OpAsmParser &p, OperationState &result) {
     // Parse return type
     Type type;
     llvm::SMLoc trailingTypeLoc;
-    if (p.parseColon() || p.getCurrentLocation(&trailingTypeLoc) || p.parseType(type))
+    if (p.parseArrow() || p.getCurrentLocation(&trailingTypeLoc) || p.parseType(type))
         return failure();
 
     // Extract the result type from the trailing function type.
@@ -247,6 +247,163 @@ static ParseResult parseCircuitOp(OpAsmParser &p, OperationState &result) {
     } else {
         result.addTypes({type});
     }
+
+    return success();
+}
+
+//===------------------------------------------------------------------------------------------===//
+// Custom pretty assembly format for gate ops
+//===------------------------------------------------------------------------------------------===//
+
+static void print(OpAsmPrinter &p, HOp op) {
+    p << op.getOperationName();
+    if (op.qbs()) {
+        p << " ";
+        p.printOperand(op.qbs());
+        p.printOptionalAttrDict(op.getAttrs(), /*elidedAttrs=*/{});
+        p << " : ";
+        p.printType(op.qbs().getType());
+    } else {
+        p.printOptionalAttrDict(op.getAttrs(), /*elidedAttrs=*/{});
+        p << " -> ";
+        p.printType(op.op().getType());
+    }
+}
+
+static void print(OpAsmPrinter &p, XOp op) {
+    p << op.getOperationName();
+    if (op.qbs()) {
+        p << " ";
+        p.printOperand(op.qbs());
+        p.printOptionalAttrDict(op.getAttrs(), /*elidedAttrs=*/{});
+        p << " : ";
+        p.printType(op.qbs().getType());
+    } else {
+        p.printOptionalAttrDict(op.getAttrs(), /*elidedAttrs=*/{});
+        p << " -> ";
+        p.printType(op.op().getType());
+    }
+}
+
+static void print(OpAsmPrinter &p, RzOp op) {
+    p << op.getOperationName();
+    p << "(";
+    p.printAttributeWithoutType(op.phiAttr());
+    p << ")";
+    if (op.qbs()) {
+        p << " ";
+        p.printOperand(op.qbs());
+        p.printOptionalAttrDict(op.getAttrs(), /*elidedAttrs=*/{"phi"});
+        p << " : ";
+        p.printType(op.qbs().getType());
+    } else {
+        p.printOptionalAttrDict(op.getAttrs(), /*elidedAttrs=*/{"phi"});
+        p << " -> ";
+        p.printType(op.op().getType());
+    }
+}
+
+static void print(OpAsmPrinter &p, CNotOp op) {
+    p << op.getOperationName();
+    p << " ";
+    if (op.qbs()) {
+        p.printOperand(op.qbs());
+        p << ", ";
+    }
+    p.printOperand(op.ctrl());
+    p.printOptionalAttrDict(op.getAttrs(), /*elidedAttrs=*/{});
+    p << " : ";
+    if (op.qbs()) {
+        p.printType(op.qbs().getType());
+        p << ", ";
+    }
+    p.printType(op.ctrl().getType());
+    if (op.op()) {
+        p << " -> ";
+        p.printType(op.op().getType());
+    }
+}
+
+static void print(OpAsmPrinter &p, AdjointOp op) {
+    p << op.getOperationName();
+    p << " ";
+    p.printOperand(op.heldOp());
+    if (op.qbs()) {
+        p << ", ";
+        p.printOperand(op.qbs());
+    }
+    p.printOptionalAttrDict(op.getAttrs(), /*elidedAttrs=*/{});
+    p << " : ";
+    p.printType(op.heldOp().getType());
+    if (op.qbs()) {
+        p << ", ";
+        p.printType(op.qbs().getType());
+    }
+    if (op.op()) {
+        p << " -> ";
+        p.printType(op.op().getType());
+    }
+}
+
+static void print(OpAsmPrinter &p, ControlOp op) {
+    p << op.getOperationName();
+    p << " ";
+    p.printOperand(op.heldOp());
+    if (op.qbs()) {
+        p << ", ";
+        p.printOperand(op.qbs());
+    }
+    p << ", ";
+    p.printOperand(op.ctrls());
+    p.printOptionalAttrDict(op.getAttrs(), /*elidedAttrs=*/{});
+    p << " : ";
+    p.printType(op.heldOp().getType());
+    if (op.qbs()) {
+        p << ", ";
+        p.printType(op.qbs().getType());
+    }
+    p << ", ";
+    p.printType(op.ctrls().getType());
+    if (op.op()) {
+        p << " -> ";
+        p.printType(op.op().getType());
+    }
+}
+
+static ParseResult prettyParseOp(OpAsmParser &p, OperationState &result, bool parametric = false) {
+    if (parametric) {
+        FloatAttr phiAttr;
+        if (p.parseLParen())
+            return failure();
+        if (p.parseAttribute(phiAttr, "phi", result.attributes))
+            return failure();
+        if (p.parseRParen())
+            return failure();
+    }
+
+    SmallVector<Type, 3> allOperandTypes;
+    llvm::SMLoc allOperandLoc = p.getCurrentLocation();
+    SmallVector<OpAsmParser::OperandType, 3> allOperands;
+    if (p.parseOperandList(allOperands))
+        return failure();
+
+    if (p.parseOptionalAttrDict(result.attributes))
+        return failure();
+
+    if (succeeded(p.parseOptionalColon()))
+        if (p.parseTypeList(allOperandTypes))
+            return failure();
+
+    // parse optional return type
+    if (succeeded(p.parseOptionalArrow())) {
+        Type type;
+        if (p.parseType(type))
+            return failure();
+        result.addTypes({type});
+    }
+
+    if (p.resolveOperands(allOperands, allOperandTypes, allOperandLoc, result.operands))
+        return failure();
 
     return success();
 }
