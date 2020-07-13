@@ -9,6 +9,11 @@
 using namespace mlir;
 using namespace mlir::quantum;
 
+
+//===------------------------------------------------------------------------------------------===//
+// Dialect Definitions
+//===------------------------------------------------------------------------------------------===//
+
 // Define the Dialect contructor. This is the point of registration of
 // all custom types, operations, attributes, etc. for the dialect.
 QuantumDialect::QuantumDialect(mlir::MLIRContext *ctx) : mlir::Dialect("q", ctx) {
@@ -38,7 +43,10 @@ struct QuregTypeStorage : public mlir::TypeStorage {
     unsigned size;
 
     // A constructor for the type storage instance.
-    QuregTypeStorage(unsigned size) { this->size = size; }
+    QuregTypeStorage(unsigned size) {
+        assert(size > 1 && "Register type must have size > 1!");
+        this->size = size;
+    }
 
     // Define the comparison function for the key type with the current storage instance.
     // This is used when constructing a new instance to ensure that we haven't already
@@ -61,7 +69,10 @@ struct COpTypeStorage : public mlir::TypeStorage {
 
     unsigned nctrl;
 
-    COpTypeStorage(unsigned nctrl) { this->nctrl = nctrl; }
+    COpTypeStorage(unsigned nctrl) {
+        assert(nctrl > 0 && "Number of controls must be > 0");
+        this->nctrl = nctrl;
+    }
 
     bool operator==(const KeyTy &key) const { return key == nctrl; }
 
@@ -80,8 +91,6 @@ struct COpTypeStorage : public mlir::TypeStorage {
 
 // Qureg
 QuregType QuregType::get(mlir::MLIRContext *ctx, unsigned size) {
-    assert((size > 1) && "Qureg size must be > 1");
-
     // Parameters to the storage class are passed after the custom type kind.
     return Base::get(ctx, QuantumTypes::Qureg, size);
 }
@@ -93,8 +102,6 @@ unsigned QuregType::getNumQubits() {
 
 // COp
 COpType COpType::get(mlir::MLIRContext *ctx, unsigned nctrl) {
-    assert((nctrl > 0) && "Qureg size must be > 0");
-
     // Parameters to the storage class are passed after the custom type kind.
     return Base::get(ctx, QuantumTypes::COp, nctrl);
 }
@@ -149,22 +156,19 @@ mlir::Type QuantumDialect::parseType(mlir::DialectAsmParser &parser) const {
 
     // Try to parse either the Qubit or Qureg type. On failure, exit this function.
     StringRef keyword;
-    if (parser.parseKeyword(&keyword)) {
+    if (parser.parseKeyword(&keyword))
         return Type();
-    }
+
     if (keyword == "qubit")
         return QubitType::get(this->getContext());
     if (keyword == "qureg") {
         unsigned size;
-        if (parser.parseLess()) {
+        if (parser.parseLess())
             return nullptr;
-        }
-        if (parser.parseInteger<unsigned>(size)) {
+        if (parser.parseInteger<unsigned>(size))
             return nullptr;
-        }
-        if (parser.parseGreater()) {
+        if (parser.parseGreater())
             return nullptr;
-        }
         return QuregType::get(this->getContext(), size);
     }
     if (keyword == "qlist")
@@ -173,15 +177,12 @@ mlir::Type QuantumDialect::parseType(mlir::DialectAsmParser &parser) const {
         return OpType::get(this->getContext());
     if (keyword == "cop") {
         unsigned nctrl;
-        if (parser.parseLess()) {
+        if (parser.parseLess())
             return nullptr;
-        }
-        if (parser.parseInteger<unsigned>(nctrl)) {
+        if (parser.parseInteger<unsigned>(nctrl))
             return nullptr;
-        }
-        if (parser.parseGreater()) {
+        if (parser.parseGreater())
             return nullptr;
-        }
         return COpType::get(this->getContext(), nctrl);
     }
     if (keyword == "circ")
@@ -410,7 +411,7 @@ static ParseResult prettyParseOp(OpAsmParser &p, OperationState &result, bool pa
 
 
 //===------------------------------------------------------------------------------------------===//
-// Additional Op methods implementations
+// Additional implementations of OpInterface methods
 //===------------------------------------------------------------------------------------------===//
 
 // Return the callee, required by the call interface.

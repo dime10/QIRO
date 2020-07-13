@@ -27,14 +27,14 @@ class Quantum_Type<string cppTypeName, string description> :
         DialectType<Quantum_Dialect, CPred<"$_self.isa<" # cppTypeName # ">()">, description>;
 // NOTE: Use DialectType instead of Type, otherwise ODS will not declare parse/print functions.
 
-// Provide definitions for the custom data types to ODS
+// Provide definitions for custom data types that support memory semantics
 def Qubit_Type : Quantum_Type<"QubitType", "Quantum qubit type">;
 def Qureg_Type : Quantum_Type<"QuregType", "Quantum register type">;
 def Qlist_Type : Quantum_Type<"QlistType", "Quantum register of undeclared size type">;
 
 // Provide custom operation types representing a gate or circuit
 def Op_Type : Quantum_Type<"OpType", "Quantum op type">;
-def ControlledOp_Type : Quantum_Type<"COpType", "Quantum  c-op type">;
+def ControlledOp_Type : Quantum_Type<"COpType", "Quantum c-op type">;
 def Circuit_Type : Quantum_Type<"CircType", "Quantum circuit type">;
 
 // Provide aggregate types that might be used in ops accepting multiple types

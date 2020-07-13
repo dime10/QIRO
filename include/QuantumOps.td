@@ -455,6 +455,11 @@ def CNotOp : Quantum_Gate<"CX", [Unitary, Hermitian]> {
         Optional<ControlledOp_Type> : $op
     );
 
+    let additionalVerifier = [{
+        if (this->qbs() && this->qbs() == this->ctrl())
+            return this->emitError() << "Cannot use same qubit for control AND target!";
+    }];
+
     let printer = "return ::print(p, *this);";
     let parser = "return ::prettyParseOp(parser, result);";
 }
@@ -547,7 +552,7 @@ def ParametricCircuitOp : Quantum_Op<"parcirc", [DeclareOpInterfaceMethods<CallO
 
     let arguments = (ins
         FlatSymbolRefAttr : $callee,
-        Confined<APIntAttr, [IntNonNegative]> : $n,
+        Confined<APIntAttr, [IntPositive]> : $n,
         Variadic<QData_Type> : $qbs
     );
 
@@ -591,7 +596,13 @@ def ParametricCircuitOp : Quantum_Op<"parcirc", [DeclareOpInterfaceMethods<CallO
         unsigned i = 0;
         auto opargtypes = qbstypes.begin();
         for (auto arg : funtype.getInputs()) {
-            if (i++ == 0) { continue; }     // skip circuit parameter (first in arg list)
+            if (i++ == 0) {
+                // make sure the circuit size parameter is declared in the function
+                if (!arg.isa<IndexType>())
+                    this->emitError() << "First function argument must be index (circuit size)!";
+                // for the rest, skip circuit parameter (first in arg list)
+                continue;
+            }
 
             auto giventype = *opargtypes++;
             if (arg.isa<QlistType>()) {
@@ -706,6 +717,9 @@ def ControlOp : Quantum_Gate<"c", [Meta]> {
     );
 
     let additionalVerifier = [{
+        if (this->qbs() && this->qbs() == this->ctrls())
+            return this->emitError() << "Cannot use same qubits for control AND target!";
+
         // obtain total number of control qubits from input
         unsigned totalctrls = 0;
 

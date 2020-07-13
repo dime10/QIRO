@@ -38,7 +38,7 @@ static llvm::cl::opt<bool> verifyPasses("verify-each",
                                         llvm::cl::init(true));
 
 static llvm::cl::opt<bool> allowUnregisteredDialects("allow-unregistered-dialect",
-                                                     llvm::cl::desc("Allow operation with no" 
+                                                     llvm::cl::desc("Allow operation with no"
                                                                     "registered dialects"),
                                                      llvm::cl::init(false));
 
@@ -61,7 +61,6 @@ int main(int argc, char **argv) {
 
     // Parse pass names in main to ensure static initialization completed.
     llvm::cl::ParseCommandLineOptions(argc, argv, "MLIR modular optimizer driver\n");
-
 
     if (showDialects) {
         mlir::MLIRContext context;

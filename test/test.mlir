@@ -69,6 +69,7 @@ module {
     q.CX %2, %0 : !q.qureg<4>, !q.qubit
     %op6 = "q.CX"(%0) : (!q.qubit) -> !q.cop<1>
     %op7 = q.CX %0 : !q.qubit -> !q.cop<1>
+    //q.CX %0, %0 : !q.qubit, !q.qubit // cannot use same qubit as control and target
 
     // create a small test circuit
     %circ0 = "q.circ"() ({
@@ -109,6 +110,10 @@ module {
     //q.parcirc @fun(4, %0, %2) : (!q.qubit, !q.qureg<4>) -> !q.circ  // too many arguments to func
     //q.parcirc @fun2(2, %2, %0) : (!q.qureg<4>, !q.qubit) -> !q.circ // arguments don't match sig
     //q.parcirc @fun(5, %2) : (!q.qureg<4>) -> !q.circ                // less than 'n' qubits given
+    //func @fun3(%n : index) {q.term}
+    //q.parcirc @fun3(0,) : () -> !q.circ                             // circuits needs >= 1 qubit
+    //func @fun4(%q : !q.qubit, %p : !q.qubit) {q.term}
+    //q.parcirc @fun4(1, %0) : (!q.qubit) -> !q.circ                  // function needs size param
 
     // test control meta operation, including on: ops, cops, and circs
     "q.c"(%op0, %1, %0) : (!q.op, !q.qubit, !q.qubit) -> ()
@@ -120,6 +125,7 @@ module {
     "q.c"(%op6, %1, %0) : (!q.cop<1>, !q.qubit, !q.qubit) -> ()
     q.c %op6, %1, %0 : !q.cop<1>, !q.qubit, !q.qubit
     //q.c %circ0, %1, %0 : !q.circ, !q.qubit, !q.qubit // can't apply circ by passing qubits
+    //q.c %op0, %2, %2 : !q.op, !q.qureg<4>, !q.qureg<4> // can't use same qubits for ctrl and trgt
 
     %cop0 = "q.c"(%op0, %0) : (!q.op, !q.qubit) -> !q.cop<1>
     %cop1 = q.c %op0, %0 : !q.op, !q.qubit -> !q.cop<1>
