@@ -65,19 +65,24 @@ struct QuregTypeStorage : public mlir::TypeStorage {
 
 // This class represents the internal storage of the Quantum 'COpType'.
 struct COpTypeStorage : public mlir::TypeStorage {
-    using KeyTy = unsigned;
+    using KeyTy = std::pair<unsigned, Type>;
 
     unsigned nctrl;
+    Type baseType;
 
-    COpTypeStorage(unsigned nctrl) {
+    COpTypeStorage(unsigned nctrl, Type baseType) {
         assert(nctrl > 0 && "Number of controls must be > 0");
+        if (baseType)
+            assert(baseType.isa<OpType>() || baseType.isa<CircType>() &&
+                   "Base type of controlled op can only be supported quantum operations!");
         this->nctrl = nctrl;
+        this->baseType = baseType;
     }
 
-    bool operator==(const KeyTy &key) const { return key == nctrl; }
+    bool operator==(const KeyTy &key) const { return key.first == nctrl && key.second == baseType; }
 
     static COpTypeStorage *construct(mlir::TypeStorageAllocator &allocator, const KeyTy &key) {
-        return new (allocator.allocate<COpTypeStorage>()) COpTypeStorage(key);
+        return new (allocator.allocate<COpTypeStorage>()) COpTypeStorage(key.first, key.second);
     }
 };
 } // end namespace detail
@@ -101,14 +106,19 @@ unsigned QuregType::getNumQubits() {
 }
 
 // COp
-COpType COpType::get(mlir::MLIRContext *ctx, unsigned nctrl) {
+COpType COpType::get(mlir::MLIRContext *ctx, unsigned nctrl, mlir::Type baseType) {
     // Parameters to the storage class are passed after the custom type kind.
-    return Base::get(ctx, QuantumTypes::COp, nctrl);
+    return Base::get(ctx, QuantumTypes::COp, nctrl, baseType);
 }
 
 unsigned COpType::getNumCtrls() {
     // 'getImpl' returns a pointer to our internal storage instance.
     return getImpl()->nctrl;
+}
+
+Type COpType::getBaseType() {
+    // 'getImpl' returns a pointer to our internal storage instance.
+    return getImpl()->baseType;
 }
 
 
@@ -136,7 +146,10 @@ void QuantumDialect::printType(mlir::Type type, mlir::DialectAsmPrinter &printer
         break;
     case QuantumTypes::COp: {
         COpType ctype = type.cast<COpType>();
-        printer << "cop<" << ctype.getNumCtrls() << ">";
+        printer << "cop<" << ctype.getNumCtrls();
+        if (ctype.getBaseType())
+            printer << ", " << ctype.getBaseType();
+        printer << ">";
         break;
     }
     case QuantumTypes::Circ:
@@ -177,13 +190,17 @@ mlir::Type QuantumDialect::parseType(mlir::DialectAsmParser &parser) const {
         return OpType::get(this->getContext());
     if (keyword == "cop") {
         unsigned nctrl;
+        Type baseType = nullptr;
         if (parser.parseLess())
             return nullptr;
         if (parser.parseInteger<unsigned>(nctrl))
             return nullptr;
+        if (succeeded(parser.parseOptionalComma()))
+            if (parser.parseType(baseType))
+                return nullptr;
         if (parser.parseGreater())
             return nullptr;
-        return COpType::get(this->getContext(), nctrl);
+        return COpType::get(this->getContext(), nctrl, baseType);
     }
     if (keyword == "circ")
         return CircType::get(this->getContext());

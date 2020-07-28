@@ -109,9 +109,11 @@ public:
 
     static bool kindof(unsigned kind) { return kind == QuantumTypes::COp; }
 
-    static COpType get(mlir::MLIRContext *ctx, unsigned nctrl);
+    static COpType get(mlir::MLIRContext *ctx, unsigned nctrl, Type baseType);
 
     unsigned getNumCtrls();
+
+    Type getBaseType();
 };
 
 // This class represents a quantum circuit, that is, a collection of quantum ops.

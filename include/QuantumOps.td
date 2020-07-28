@@ -665,8 +665,17 @@ def ApplyCircOp : Quantum_Op<"apply"> {
     }];
 
     let arguments = (ins
-        QOp_Type
+        QCirc_Type : $circ
     );
+
+    let verifier = [{
+        if (this->circ().getType().isa<COpType>() &&
+            (!this->circ().getType().cast<COpType>().getBaseType() ||
+             !this->circ().getType().cast<COpType>().getBaseType().isa<CircType>()))
+            return this->emitError() << "This op can only be applied to circuit(-derived) types!";
+
+        return success();
+    }];
 
     let assemblyFormat = [{
         operands attr-dict `:` type(operands)
@@ -717,21 +726,26 @@ def ControlOp : Quantum_Gate<"c", [Meta]> {
     );
 
     let additionalVerifier = [{
+        // make sure target and control aren't identical (basic test, not comprehensive)
         if (this->qbs() && this->qbs() == this->ctrls())
             return this->emitError() << "Cannot use same qubits for control AND target!";
+
+        auto heldOp = this->heldOp().getType();
+        // make sure user is not trying to apply a circuit op by specifying a target
+        if (heldOp.isa<CircType>() && this->qbs())
+            return this->emitError() << "Circuit cannot be applied by specifying qubits!";
 
         // obtain total number of control qubits from input
         unsigned totalctrls = 0;
 
-        auto optype = this->heldOp().getType();
-        if (optype.isa<COpType>())
-            totalctrls += optype.cast<COpType>().getNumCtrls();
+        if (heldOp.isa<COpType>())
+            totalctrls += heldOp.cast<COpType>().getNumCtrls();
 
-        auto qbtype = this->ctrls().getType();
-        if (qbtype.isa<QubitType>())
+        auto ctrls = this->ctrls().getType();
+        if (ctrls.isa<QubitType>())
             totalctrls++;
-        else if (qbtype.isa<QuregType>())
-            totalctrls += qbtype.cast<QuregType>().getNumQubits();
+        else if (ctrls.isa<QuregType>())
+            totalctrls += ctrls.cast<QuregType>().getNumQubits();
 
         //auto xtypes = this->extractrls().getTypes();
         //for (auto xtype : xtypes) {
@@ -741,12 +755,22 @@ def ControlOp : Quantum_Gate<"c", [Meta]> {
         //        totalctrls += xtype.cast<QuregType>().getNumQubits();
         //}
 
-        // assert that this matches the output type
-        if (this->op() && this->op().getType().cast<COpType>().getNumCtrls() != totalctrls)
-            return this->emitError() << "Number of output controls doesn't match inputs!";
+        // perform several checks on the return type
+        if (this->op()) {
+            COpType output = this->op().getType().cast<COpType>();
+            // assert correct number of control qubits
+            if (output.getNumCtrls() != totalctrls)
+                return this->emitError() << "Number of output controls doesn't match inputs!";
 
-        if (this->heldOp().getType().isa<CircType>() && this->qbs())
-            return this->emitError() << "Circuit cannot be applied by specifying qubits!";
+            // assert proper base type
+            if (heldOp.isa<COpType>()) {
+                if (heldOp.cast<COpType>().getBaseType() != output.getBaseType())
+                    return this->emitError() << "ControlOp must preserve base type when given COp!";
+            } else {
+                if (heldOp != output.getBaseType())
+                    return this->emitError() << "Returned base type doesn't match given operation!";
+            }
+        }
     }];
 
     let printer = "return ::print(p, *this);";

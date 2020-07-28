@@ -127,34 +127,43 @@ module {
     //q.c %circ0, %1, %0 : !q.circ, !q.qubit, !q.qubit // can't apply circ by passing qubits
     //q.c %op0, %2, %2 : !q.op, !q.qureg<4>, !q.qureg<4> // can't use same qubits for ctrl and trgt
 
-    %cop0 = "q.c"(%op0, %0) : (!q.op, !q.qubit) -> !q.cop<1>
-    %cop1 = q.c %op0, %0 : !q.op, !q.qubit -> !q.cop<1>
-    %ccop0 = "q.c"(%cop0, %2) : (!q.cop<1>, !q.qureg<4>) -> !q.cop<5>
-    %ccop1 =  q.c %cop0, %2 : !q.cop<1>, !q.qureg<4> -> !q.cop<5>
-    %ccirc0 = "q.c"(%circ0, %0) : (!q.circ, !q.qubit) -> !q.cop<1>
-    %ccirc1 =  q.c %circ0, %0 : !q.circ, !q.qubit -> !q.cop<1>
+    %cop0 = "q.c"(%op0, %0) : (!q.op, !q.qubit) -> !q.cop<1, !q.op>
+    %cop1 = q.c %op0, %0 : !q.op, !q.qubit -> !q.cop<1, !q.op>
+    %cop6 = "q.c"(%op6, %0) : (!q.cop<1>, !q.qubit) -> !q.cop<2>
+    %cop7 = q.c %op7, %0 : !q.cop<1>, !q.qubit -> !q.cop<2>
+    %ccop0 = "q.c"(%cop0, %2) : (!q.cop<1, !q.op>, !q.qureg<4>) -> !q.cop<5, !q.op>
+    %ccop1 =  q.c %cop0, %2 : !q.cop<1, !q.op>, !q.qureg<4> -> !q.cop<5, !q.op>
+    %ccirc0 = "q.c"(%circ0, %0) : (!q.circ, !q.qubit) -> !q.cop<1, !q.circ>
+    %ccirc1 =  q.c %circ0, %0 : !q.circ, !q.qubit -> !q.cop<1, !q.circ>
     //q.c %op0, %2 : !q.op, !q.qureg<4> -> !q.cop<5>       // num controls mismatch
     //q.c %ccop0, %2 : !q.cop<5>, !q.qureg<4> -> !q.cop<3> // num combined controls mismatch
+    //q.c %op0, %0 : !q.op, !q.qubit -> !q.cop<1, !q.circ> // wrong base type
+    //q.c %op0, %0 : !q.op, !q.qubit -> !q.cop<1>          // must provide base type
+    //q.c %op6, %0 : !q.cop<1>, !q.qubit -> !q.cop<2, !q.cop<1>>       // can't use cop as base type
+    //q.c %cop0, %0 : !q.cop<1, !q.op>, !q.qubit -> !q.cop<2, !q.circ> // must preserve base type
+    //q.c %cop0, %0 : !q.cop<1, !q.op>, !q.qubit -> !q.cop<2>          // must preserve base type
 
     // test adjoint meta operation
     "q.adj"(%op0, %0) : (!q.op, !q.qubit) -> ()
     q.adj %op0, %0 : !q.op, !q.qubit
-    "q.adj"(%cop0, %0) : (!q.cop<1>, !q.qubit) -> ()
-    q.adj %cop0, %0 : !q.cop<1>, !q.qubit
+    "q.adj"(%cop0, %0) : (!q.cop<1, !q.op>, !q.qubit) -> ()
+    q.adj %cop0, %0 : !q.cop<1, !q.op>, !q.qubit
     %aop0 = "q.adj"(%op0) : (!q.op) -> !q.op
     %aop1 = q.adj %op0 : !q.op -> !q.op
     %acirc0 = "q.adj"(%circ0) : (!q.circ) -> !q.circ
     %acirc1 = q.adj %circ0 : !q.circ -> !q.circ
-    %acop0 = "q.adj"(%cop0) : (!q.cop<1>) -> !q.cop<1>
-    %acop1 = q.adj %cop0 : !q.cop<1> -> !q.cop<1>
+    %acop0 = "q.adj"(%cop0) : (!q.cop<1, !q.op>) -> !q.cop<1, !q.op>
+    %acop1 = q.adj %cop0 : !q.cop<1, !q.op> -> !q.cop<1, !q.op>
     //q.adj %op0 : !q.op -> !q.cop<1>      // input and output must be the same type
     //q.adj %circ0, %0 : !q.circ, !q.qubit // circ can't be applied by specifying qubits
 
     // test circuit application
     "q.apply"(%circ0) : (!q.circ) -> ()
     q.apply %circ0 : !q.circ
-    "q.apply"(%ccirc0) : (!q.cop<1>) -> ()
-    q.apply %ccirc0 : !q.cop<1>
+    "q.apply"(%ccirc0) : (!q.cop<1, !q.circ>) -> ()
+    q.apply %ccirc0 : !q.cop<1, !q.circ>
     "q.apply"(%acirc0) : (!q.circ) -> ()
     q.apply %acirc0 : !q.circ
+    //q.apply %op6 : !q.cop<1>         // can only be applied to circuit(-derived) types
+    //q.apply %cop0 : !q.cop<1, !q.op> // can only be applied to circuit(-derived) types
 }
