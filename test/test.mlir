@@ -1,3 +1,51 @@
+// new module to test SSA operation mode
+module {
+    // compatibility with memory semantics is maintained
+    %0 = q.alloc -> !q.qubit
+    %1 = q.allocreg(4) -> !q.qureg<4>
+    q.H %0 : !q.qubit
+    q.H %1 : !q.qureg<4>
+    %h = q.H -> !q.op
+
+    // value semantics
+    %q0_0 = q.alloc -> !q.state
+    %q0_1 = q.H %q0_0 : !q.state -> !q.state
+    %q0_2 = q.H %q0_0 : !q.state -> !q.state // state reuse is illegal but not enforced
+    //%q0_3 = q.H %0 : !q.qubit -> !q.state  // cannot mix qubits & states
+    //q.H %q0_0 : !q.state                   // must return new state
+
+    // other gates
+    %q0_4 = q.X %q0_0 : !q.state -> !q.state
+    %q0_5 = q.RZ(0.1) %q0_0 : !q.state -> !q.state
+    %q0_6 = q.CX %q0_0, %q0_1 : !q.state, !q.state -> !q.state   // illegal but not enforced
+    //%q0_6 = q.CX %q0_0, %q0_0 : !q.state, !q.state -> !q.state // can't use same trgt and ctrl
+    //%q0_7 = q.CX %q0_0, %0 : !q.state, !q.qubit -> !q.state    // cannot mix mode within arguments
+    %ch = q.c %h, %q0_0 : !q.op, !q.state -> !q.cop<1, !q.op>
+    q.c %h, %q0_1, %q0_0 : !q.op, !q.state, !q.state -> !q.state
+    %ah = q.adj %h : !q.op -> !q.op
+    q.adj %h, %q0_0 : !q.op, !q.state -> !q.state
+
+    // test new return statement
+    func @retTest(%arg : !q.state) -> !q.state {
+        q.return %arg : !q.state
+    }
+
+    // test new function circuit type
+    %circ = q.funcirc @retTest -> !q.fcirc<(!q.state) -> !q.state>
+    //q.funcirc @retTest -> !q.fcirc<(!q.state) -> ()> // return type does not match function type
+
+    // apply meta op the function circuit
+    %ccirc = q.c %circ, %q0_0 : !q.fcirc<(!q.state) -> !q.state>, !q.state -> !q.cop<1, !q.fcirc<(!q.state) -> !q.state>>
+    %acirc = q.adj %circ : !q.fcirc<(!q.state) -> !q.state> -> !q.fcirc<(!q.state) -> !q.state>
+
+    // execute the function circuits
+    %q0_7 = call @retTest(%q0_6) : (!q.state) -> !q.state
+    %q0_8 = q.applyfc %circ(%q0_7) : !q.fcirc<(!q.state) -> !q.state>
+    %q0_9 = q.applyfc %ccirc(%q0_8) : !q.cop<1, !q.fcirc<(!q.state) -> !q.state>>
+    %q0_10 = q.applyfc %acirc(%q0_9) : !q.fcirc<(!q.state) -> !q.state>
+    //%q0_9 = q.applyfc %ch(%q0_8) : !q.cop<1, !q.op>> // only works on fcirc(-derived) types
+}
+
 // test module for all quantum operations, commented ops are supposed to fail
 module {
     // test register operations (extracting qubit, slicing register, combining to register)
