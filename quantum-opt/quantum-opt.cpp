@@ -1,19 +1,15 @@
 /* Create a quantum-opt program to roundtrip IR examples using the quant dialect */
 
-#include "mlir/IR/Dialect.h"
-#include "mlir/IR/MLIRContext.h"
 #include "mlir/InitAllDialects.h"
 #include "mlir/InitAllPasses.h"
-#include "mlir/Pass/Pass.h"
 #include "mlir/Pass/PassManager.h"
 #include "mlir/Support/FileUtilities.h"
 #include "mlir/Support/MlirOptMain.h"
-#include "llvm/Support/CommandLine.h"
 #include "llvm/Support/InitLLVM.h"
-#include "llvm/Support/SourceMgr.h"
 #include "llvm/Support/ToolOutputFile.h"
 
 #include "QuantumDialect.h"
+#include "QuantumSSADialect.h"
 
 static llvm::cl::opt<std::string> inputFilename(llvm::cl::Positional,
                                                 llvm::cl::desc("<input file>"),
@@ -51,6 +47,7 @@ int main(int argc, char **argv) {
     mlir::registerAllPasses();
 
     mlir::registerDialect<mlir::quantum::QuantumDialect>();
+    mlir::registerDialect<mlir::quantumssa::QuantumSSADialect>();
     // TODO: Register quantum passes here.
 
     llvm::InitLLVM y(argc, argv);
@@ -85,11 +82,11 @@ int main(int argc, char **argv) {
         exit(1);
     }
 
-    if (failed(MlirOptMain(output->os(), std::move(file), passPipeline,
-                            splitInputFile, verifyDiagnostics, verifyPasses,
-                            allowUnregisteredDialects))) {
+    if (failed(MlirOptMain(output->os(), std::move(file), passPipeline, splitInputFile,
+                           verifyDiagnostics, verifyPasses, allowUnregisteredDialects))) {
         return 1;
     }
+
     // Keep the output file if the invocation of MlirOptMain was successful.
     output->keep();
     return 0;

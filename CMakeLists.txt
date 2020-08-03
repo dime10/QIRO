@@ -43,5 +43,5 @@ link_directories(${LLVM_BUILD_LIBRARY_DIR})
 add_definitions(${LLVM_DEFINITIONS})
 
 add_subdirectory(include)
-add_subdirectory(lib/IR)
+add_subdirectory(lib)
 add_subdirectory(quantum-opt)
