@@ -434,11 +434,11 @@ def CNotOp : Quantum_Gate<"CX", [Unitary, Hermitian]> {
         %1 = "q.alloc"() : () -> !q.qubit
         %2 = "q.allocreg"() {size=4} : () -> !q.qureg<4>
         // Apply a CNOT to target %1 and control %0
-        "q.CX"(%1, %0) : (!q.qubit, !q.qubit) -> ()
+        "q.CX"(%0, %1) : (!q.qubit, !q.qubit) -> ()
         // Apply a CNOT with control %0 to each qubit in register %2
-        "q.CX"(%2, %0) : (!q.qureg<4>, !q.qubit) -> ()
+        "q.CX"(%0, %2) : (!q.qubit, !q.qureg<4>) -> ()
         // OR in custom assembly format
-        q.CX %2, %0 : !q.qureg<4>, !q.qubit
+        q.CX %0, %2 : !q.qubit, !q.qureg<4>
         // Generate CNOT gate without application to qubits (to be manipulated via meta-ops)
         $op = "q.CX"(%0) : (!q.qubit) -> !q.cop<1>
         // OR in custom assembly format
@@ -447,8 +447,8 @@ def CNotOp : Quantum_Gate<"CX", [Unitary, Hermitian]> {
     }];
 
     let arguments = (ins
-        Optional<QData_Type> : $qbs,
-        Qubit_Type : $ctrl
+        Qubit_Type : $ctrl,
+        Optional<QData_Type> : $qbs
     );
 
     let results = (outs
@@ -702,13 +702,13 @@ def ControlOp : Quantum_Gate<"c", [Meta]> {
         %1 = "q.alloc"() : () -> !q.qubit
         %2 = "q.allocreg"() {size=4} : () -> !q.qureg<4>
         %op = "q.H"() : () -> !q.op
-        // Control H op on qubit %1 and apply to qubit %0
+        // Control H op on qubit %0 and apply to qubit %1
         "q.c"(%op, %0, %1) : (!q.op, !q.qubit, !q.qubit) -> ()
-        // Control H op on all of register %2 and apply to qubit %0
+        // Control H op on qubit %0 and apply to all qubits in register %2
         "q.c"(%op, %0, %2) : (!q.op, !q.qubit, !q.qureg<4>) -> ()
-        // Control H op on qubit %1 and apply to all qubits in register %2
+        // Control H op on all of register %2 and apply to qubit %1
         "q.c"(%op, %2, %1) : (!q.op, !q.qureg<4>, !q.qubit) -> ()
-        // Control H op on qubit %1 but leave application open
+        // Control H op on qubit %0 but leave application open
         %cop = "q.c"(%op, %1) : (!q.op, !q.qubit) -> !q.cop<1>
         // OR in custom assembly format
         %cop = q.c %op, %1 : !q.op, !q.qubit -> !q.cop<1>
@@ -716,8 +716,8 @@ def ControlOp : Quantum_Gate<"c", [Meta]> {
 
     let arguments = (ins
         QOp_Type : $heldOp,
-        Optional<QData_Type> : $qbs,
-        QData_Type: $ctrls
+        QData_Type: $ctrls,
+        Optional<QData_Type> : $qbs
         // Variadic<QData_Type> : $extractrls
     );
 

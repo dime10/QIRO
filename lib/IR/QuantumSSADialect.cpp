@@ -305,18 +305,18 @@ static void print(OpAsmPrinter &p, RzOp op) {
 static void print(OpAsmPrinter &p, CNotOp op) {
     p << op.getOperationName();
     p << " ";
-    if (op.qbs()) {
-        p.printOperand(op.qbs());
-        p << ", ";
-    }
     p.printOperand(op.ctrl());
+    if (op.qbs()) {
+        p << ", ";
+        p.printOperand(op.qbs());
+    }
     p.printOptionalAttrDict(op.getAttrs(), /*elidedAttrs=*/{});
     p << " : ";
-    if (op.qbs()) {
-        p.printType(op.qbs().getType());
-        p << ", ";
-    }
     p.printType(op.ctrl().getType());
+    if (op.qbs()) {
+        p << ", ";
+        p.printType(op.qbs().getType());
+    }
     if (op.res()) {
         p << " -> ";
         p.printType(op.res().getType());
@@ -327,21 +327,21 @@ static void print(OpAsmPrinter &p, ControlOp op) {
     p << op.getOperationName();
     p << " ";
     p.printOperand(op.heldOp());
+    p << ", ";
+    p.printOperand(op.ctrls());
     if (op.qbs()) {
         p << ", ";
         p.printOperand(op.qbs());
     }
-    p << ", ";
-    p.printOperand(op.ctrls());
     p.printOptionalAttrDict(op.getAttrs(), /*elidedAttrs=*/{});
     p << " : ";
     p.printType(op.heldOp().getType());
+    p << ", ";
+    p.printType(op.ctrls().getType());
     if (op.qbs()) {
         p << ", ";
         p.printType(op.qbs().getType());
     }
-    p << ", ";
-    p.printType(op.ctrls().getType());
     if (op.res()) {
         p << " -> ";
         p.printType(op.res().getType());

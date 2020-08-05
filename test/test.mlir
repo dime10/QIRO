@@ -63,10 +63,10 @@ module {
     %op4 = "q.RZ"() {phi=0.1} : () -> !q.op
     %op5 = q.RZ(0.1) -> !q.op
 
-    "q.CX"(%1, %0) : (!q.qubit, !q.qubit) -> ()
-    q.CX %1, %0 : !q.qubit, !q.qubit
-    "q.CX"(%2, %0) : (!q.qureg<4>, !q.qubit) -> ()
-    q.CX %2, %0 : !q.qureg<4>, !q.qubit
+    "q.CX"(%0, %1) : (!q.qubit, !q.qubit) -> ()
+    q.CX %0, %1 : !q.qubit, !q.qubit
+    "q.CX"(%0, %2) : (!q.qubit, !q.qureg<4>) -> ()
+    q.CX %0, %2 : !q.qubit, !q.qureg<4>
     %op6 = "q.CX"(%0) : (!q.qubit) -> !q.cop<1>
     %op7 = q.CX %0 : !q.qubit -> !q.cop<1>
     //q.CX %0, %0 : !q.qubit, !q.qubit // cannot use same qubit as control and target
@@ -116,15 +116,15 @@ module {
     //q.parcirc @fun4(1, %0) : (!q.qubit) -> !q.circ                  // function needs size param
 
     // test control meta operation, including on: ops, cops, and circs
-    "q.c"(%op0, %1, %0) : (!q.op, !q.qubit, !q.qubit) -> ()
-    q.c %op0, %1, %0 : !q.op, !q.qubit, !q.qubit
-    "q.c"(%op0, %1, %2) : (!q.op, !q.qubit, !q.qureg<4>) -> ()
-    q.c %op0, %1, %2 : !q.op, !q.qubit, !q.qureg<4>
-    "q.c"(%op0, %2, %0) : (!q.op, !q.qureg<4>, !q.qubit) -> ()
-    q.c %op0, %2, %0 : !q.op, !q.qureg<4>, !q.qubit
-    "q.c"(%op6, %1, %0) : (!q.cop<1>, !q.qubit, !q.qubit) -> ()
-    q.c %op6, %1, %0 : !q.cop<1>, !q.qubit, !q.qubit
-    //q.c %circ0, %1, %0 : !q.circ, !q.qubit, !q.qubit // can't apply circ by passing qubits
+    "q.c"(%op0, %0, %1) : (!q.op, !q.qubit, !q.qubit) -> ()
+    q.c %op0, %0, %1 : !q.op, !q.qubit, !q.qubit
+    "q.c"(%op0, %0, %2) : (!q.op, !q.qubit, !q.qureg<4>) -> ()
+    q.c %op0, %0, %2 : !q.op, !q.qubit, !q.qureg<4>
+    "q.c"(%op0, %2, %1) : (!q.op, !q.qureg<4>, !q.qubit) -> ()
+    q.c %op0, %2, %1 : !q.op, !q.qureg<4>, !q.qubit
+    "q.c"(%op6, %0, %1) : (!q.cop<1>, !q.qubit, !q.qubit) -> ()
+    q.c %op6, %0, %1 : !q.cop<1>, !q.qubit, !q.qubit
+    //q.c %circ0, %0, %1 : !q.circ, !q.qubit, !q.qubit   // can't apply circ by passing qubits
     //q.c %op0, %2, %2 : !q.op, !q.qureg<4>, !q.qureg<4> // can't use same qubits for ctrl and trgt
 
     %cop0 = "q.c"(%op0, %0) : (!q.op, !q.qubit) -> !q.cop<1, !q.op>

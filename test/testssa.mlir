@@ -13,14 +13,14 @@ module {
 
     %q0_3 = qs.X %q0_2 : !qs.qstate -> !qs.qstate
     %q0_4 = qs.RZ(0.1) %q0_3 : !qs.qstate -> !qs.qstate
-    %q0_5 = qs.CX %q0_4, %q0_0 : !qs.qstate, !qs.qstate -> !qs.qstate
-    %r0_2 = qs.CX %r0_1, %q0_0 : !qs.rstate<4>, !qs.qstate -> !qs.rstate<4>
+    %q0_5 = qs.CX %q0_0, %q0_4 : !qs.qstate, !qs.qstate -> !qs.qstate
+    %r0_2 = qs.CX %q0_0, %r0_1 : !qs.qstate, !qs.rstate<4> -> !qs.rstate<4>
     //%q0_6 = qs.CX %q0_5, %q0_5 : !qs.qstate, !qs.qstate -> !qs.qstate // same trgt & ctrl
 
     %ch = qs.c %h, %q0_0 : !qs.op, !qs.qstate -> !qs.cop<1, !qs.op>
-    %q0_6 = qs.c %h, %q0_5, %q0_0 : !qs.op, !qs.qstate, !qs.qstate -> !qs.qstate
-    %q0_7 = qs.c %h, %q0_6, %r0_0 : !qs.op, !qs.qstate, !qs.rstate<4> -> !qs.qstate
-    %r0_3 = qs.c %h, %r0_2, %q0_0 : !qs.op, !qs.rstate<4>, !qs.qstate -> !qs.rstate<4>
+    %q0_6 = qs.c %h, %q0_0, %q0_5 : !qs.op, !qs.qstate, !qs.qstate -> !qs.qstate
+    %q0_7 = qs.c %h, %r0_0, %q0_6 : !qs.op, !qs.rstate<4>, !qs.qstate -> !qs.qstate
+    %r0_3 = qs.c %h, %q0_0, %r0_2 : !qs.op, !qs.qstate, !qs.rstate<4> -> !qs.rstate<4>
 
     %ah = qs.adj %h : !qs.op -> !qs.op
     %q0_8 = qs.adj %h, %q0_7 : !qs.op, !qs.qstate -> !qs.qstate

@@ -243,11 +243,11 @@ def CNotOp : QuantumSSA_Gate<"CX", [Unitary, Hermitian]> {
         %1 = "qs.alloc"() : () -> !qs.qstate
         %2 = "qs.allocreg"() {size=4} : () -> !qs.rstate<4>
         // Apply a CNOT to target %1 and control %0
-        "qs.CX"(%1, %0) : (!qs.qstate, !qs.qstate) -> ()
+        "qs.CX"(%0, %1) : (!qs.qstate, !qs.qstate) -> ()
         // Apply a CNOT with control %0 to each qubit in register %2
-        "qs.CX"(%2, %0) : (!qs.rstate<4>, !qs.qstate) -> ()
+        "qs.CX"(%0, %2) : (!qs.qstate, !qs.rstate<4>) -> ()
         // OR in custom assembly format
-        qs.CX %2, %0 : !qs.rstate<4>, !qs.qstate
+        qs.CX %0, %2 : !qs.qstate, !qs.rstate<4>
         // Generate CNOT gate without application to qubits (to be manipulated via meta-ops)
         $op = "qs.CX"(%0) : (!qs.qstate) -> !qs.cop<1>
         // OR in custom assembly format
@@ -256,8 +256,8 @@ def CNotOp : QuantumSSA_Gate<"CX", [Unitary, Hermitian]> {
     }];
 
     let arguments = (ins
-        Optional<QData_Type> : $qbs,
-        Qstate_Type : $ctrl
+        Qstate_Type : $ctrl,
+        Optional<QData_Type> : $qbs
     );
 
     let results = (outs
@@ -426,12 +426,13 @@ def ControlOp : QuantumSSA_Gate<"c", [Meta]> {
         %1 = "qs.alloc"() : () -> !qs.state
         %2 = "qs.allocreg"() {size=4} : () -> !qs.rstate<4>
         %op = "qs.H"() : () -> !qs.op
-        // Control H op on qubit %1 and apply to qubit %0
+        // Control H op on qubit %0 and apply to qubit %1
         "qs.c"(%op, %0, %1) : (!qs.op, !qs.state, !qs.state) -> ()
-        // Control H op on all of register %2 and apply to qubit %0
+        // Control H op on qubit %0 and apply to all qubits in register %2
         "qs.c"(%op, %0, %2) : (!qs.op, !qs.state, !qs.rstate<4>) -> ()
-        // Control H op on qubit %1 and apply to all qubits in register %2
-        "qs.c"(%op, %2, %1) : (!qs.op, !qs.rstate<4>, !qs.state) -> ()
+        // Control H op on all of register %2 and apply to qubit %1
+        "qs.c"(%op, %2, %1) : (!qs.op, !qs.rstate<4>, !qs.qstate) -> ()
+
         // Control H op on qubit %1 but leave application open
         %cop = "qs.c"(%op, %1) : (!qs.op, !qs.state) -> !qs.cop<1, !qs.op>
         // OR in custom assembly format
@@ -440,8 +441,8 @@ def ControlOp : QuantumSSA_Gate<"c", [Meta]> {
 
     let arguments = (ins
         QOp_Type : $heldOp,
-        Optional<QData_Type> : $qbs,
-        QData_Type : $ctrls
+        QData_Type : $ctrls,
+        Optional<QData_Type> : $qbs
     );
 
     let results = (outs
