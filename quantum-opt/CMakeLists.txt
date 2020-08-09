@@ -5,6 +5,7 @@ set(LIBS
     ${conversion_libs}
     MLIROptLib
     MLIRQuantum
+    MLIRQuantumTransforms
 )
 add_llvm_executable(quantum-opt quantum-opt.cpp)
 

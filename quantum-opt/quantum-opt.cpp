@@ -10,6 +10,7 @@
 
 #include "QuantumDialect.h"
 #include "QuantumSSADialect.h"
+#include "Passes.h"
 
 static llvm::cl::opt<std::string> inputFilename(llvm::cl::Positional,
                                                 llvm::cl::desc("<input file>"),
@@ -48,7 +49,9 @@ int main(int argc, char **argv) {
 
     mlir::registerDialect<mlir::quantum::QuantumDialect>();
     mlir::registerDialect<mlir::quantumssa::QuantumSSADialect>();
-    // TODO: Register quantum passes here.
+    mlir::registerPass("convert-mem-to-val",
+                       "Changes op mode from memory to value semantics, by module.",
+                       mlir::quantum::createMemToValPass);
 
     llvm::InitLLVM y(argc, argv);
 
