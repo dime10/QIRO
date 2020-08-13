@@ -9,6 +9,8 @@ add_mlir_dialect_library(MLIRQuantum  # library name
     DEPENDS                           # keyword for libraries belonging to this dialect
     MLIRQuantumOpsIncGen              # (typically in the form of IncGen files)
     MLIRQuantumSSAOpsIncGen
+    MLIRQuantumInterfacesIncGen
+
 
     LINK_LIBS PUBLIC                  # libs from other dialects are declared using PUBLIC keyword
     MLIRIR                            # LINK_LIBS is used to link to MLIR libraries

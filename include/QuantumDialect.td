@@ -8,6 +8,21 @@ def APFloatAttr : Attr<CPred<"$_self.isa<FloatAttr>()">, "arbitrary float atribu
     let returnType = [{ APFloat }];
 }
 
+class 2dArrayAttrBase<Attr element, string description> : ArrayAttrBase<
+        And<[
+            CPred<"$_self.isa<ArrayAttr>()">,
+            Concat<"llvm::all_of($_self.cast<ArrayAttr>(), [](Attribute attr) { return ",
+                And<[
+                    CPred<"attr.isa<ArrayAttr>()">,
+                    Concat<"llvm::all_of(attr.cast<ArrayAttr>(), [](Attribute attr) { return ",
+                        SubstLeaves<"$_self", "attr", element.predicate>, "; })">
+                ]>,  "; })">
+        ]>, description> {
+    let constBuilderCall = "$_builder.getArrayAttr($0)";
+    Attr elementAttr = element;
+}
+def 2dI64ArrayAttr : 2dArrayAttrBase<I64Attr, "2D 64-bit integer array attribute">;
+
 // Define the basic properties of our dialect
 def Quantum_Dialect : Dialect {
     let name = "q";

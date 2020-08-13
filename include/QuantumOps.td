@@ -2,6 +2,7 @@
 #define QUANTUM_OPS
 
 include "QuantumDialect.td"
+include "QuantumInterfaces.td"
 include "mlir/Interfaces/SideEffectInterfaces.td"
 include "mlir/Interfaces/CallInterfaces.td"
 
@@ -282,7 +283,7 @@ def GenRegOp : Quantum_Op<"genreg", [NoSideEffect]> {
     }];
 }
 
-def HOp : Quantum_Gate<"H", [Unitary, Hermitian]> {
+def HOp : Quantum_Gate<"H", [Unitary, Hermitian, AttrSizedOperandSegments, RegAccessInterface]> {
     let summary = "Hadamard gate.";
     let description = [{
         The Hadamard gate is a single Qubit (hermitian) unitary.
@@ -313,18 +314,35 @@ def HOp : Quantum_Gate<"H", [Unitary, Hermitian]> {
     }];
 
     let arguments = (ins
-        Optional<QData_Type> : $qbs
+        Optional<QData_Type> : $qbs,
+        Variadic<Index> : $range,
+        I64ArrayAttr : $static_range
     );
 
     let results = (outs
         Optional<Op_Type> : $op
     );
 
+    let extraClassDeclaration = [{
+        static StringRef getAccessorAttrName(unsigned i) {
+            assert(i == 0 && "There is only 1 QData operand for the HOp!");
+            return "static_range";
+        }
+
+        static std::pair<SmallVector<bool, 4>, unsigned> getRegLikeArray() {
+            return {SmallVector<bool, 4>({true}), 1};
+        }
+
+        static size_t getSegmentSizesArraySize() {
+            return 2;
+        }
+    }];
+
     let printer = "return ::print(p, *this);";
-    let parser = "return ::prettyParseOp(parser, result);";
+    let parser = "return ::parseRegAccessOps<HOp>(parser, result);";
 }
 
-def XOp : Quantum_Gate<"X", [Unitary, Hermitian]> {
+def XOp : Quantum_Gate<"X", [Unitary, Hermitian, AttrSizedOperandSegments, RegAccessInterface]> {
     let summary = "NOT gate.";
     let description = [{
         The NOT gate is a single Qubit (hermitian) unitary.
@@ -355,18 +373,35 @@ def XOp : Quantum_Gate<"X", [Unitary, Hermitian]> {
     }];
 
     let arguments = (ins
-        Optional<QData_Type> : $qbs
+        Optional<QData_Type> : $qbs,
+        Variadic<Index> : $range,
+        I64ArrayAttr : $static_range
     );
 
     let results = (outs
         Optional<Op_Type> : $op
     );
 
+    let extraClassDeclaration = [{
+        static StringRef getAccessorAttrName(unsigned i) {
+            assert(i == 0 && "There is only 1 QData operand for the XOp!");
+            return "static_range";
+        }
+
+        static std::pair<SmallVector<bool, 4>, unsigned> getRegLikeArray() {
+            return {SmallVector<bool, 4>({true}), 1};
+        }
+
+        static size_t getSegmentSizesArraySize() {
+            return 2;
+        }
+    }];
+
     let printer = "return ::print(p, *this);";
-    let parser = "return ::prettyParseOp(parser, result);";
+    let parser = "return ::parseRegAccessOps<XOp>(parser, result);";
 }
 
-def RzOp : Quantum_Gate<"RZ", [Unitary]> {
+def RzOp : Quantum_Gate<"RZ", [Unitary, AttrSizedOperandSegments, RegAccessInterface]> {
     let summary = "Z-Rotation gate.";
     let description = [{
         The Rz gate is a single Qubit unitary.
@@ -399,6 +434,8 @@ def RzOp : Quantum_Gate<"RZ", [Unitary]> {
 
     let arguments = (ins
         Optional<QData_Type> : $qbs,
+        Variadic<Index> : $range,
+        I64ArrayAttr : $static_range,
         APFloatAttr : $phi
     );
 
@@ -406,11 +443,26 @@ def RzOp : Quantum_Gate<"RZ", [Unitary]> {
         Optional<Op_Type> : $op
     );
 
+    let extraClassDeclaration = [{
+        static StringRef getAccessorAttrName(unsigned i) {
+            assert(i == 0 && "There is only 1 QData operand for the RzOp!");
+            return "static_range";
+        }
+
+        static std::pair<SmallVector<bool, 4>, unsigned> getRegLikeArray() {
+            return {SmallVector<bool, 4>({true}), 1};
+        }
+
+        static size_t getSegmentSizesArraySize() {
+            return 2;
+        }
+    }];
+
     let printer = "return ::print(p, *this);";
-    let parser = "return ::prettyParseOp(parser, result, true);";
+    let parser = "return ::parseRegAccessOps<RzOp>(parser, result, true);";
 }
 
-def CNotOp : Quantum_Gate<"CX", [Unitary, Hermitian]> {
+def CNotOp : Quantum_Gate<"CX", [Unitary, Hermitian, AttrSizedOperandSegments, RegAccessInterface]>{
     let summary = "CNOT gate.";
     let description = [{
         The CNOT gate is a two Qubit (hermitian) unitary.
@@ -447,8 +499,12 @@ def CNotOp : Quantum_Gate<"CX", [Unitary, Hermitian]> {
     }];
 
     let arguments = (ins
-        Qubit_Type : $ctrl,
-        Optional<QData_Type> : $qbs
+        QData_Type : $ctrl,
+        Optional<Index> : $crange,
+        Optional<QData_Type> : $qbs,
+        Variadic<Index> : $qrange,
+        I64ArrayAttr : $static_crange,
+        I64ArrayAttr : $static_qrange
     );
 
     let results = (outs
@@ -456,12 +512,37 @@ def CNotOp : Quantum_Gate<"CX", [Unitary, Hermitian]> {
     );
 
     let additionalVerifier = [{
-        if (this->qbs() && this->qbs() == this->ctrl())
-            return this->emitError() << "Cannot use same qubit for control AND target!";
+        //if (this->qbs() && this->qbs() == this->ctrl())
+        //    return this->emitError() << "Cannot use same qubit for control AND target!";
+        if (this->ctrl().getType().isa<QuregType>() && (!this->crange() &&
+                                                         this->static_crange().size() != 1))
+            return this->emitError() << "The control operand can only be a singular qubit, thus if "
+                                        "type is Qureg, must provide a single reg accessor index!";
+    }];
+
+    let extraClassDeclaration = [{
+        static StringRef getAccessorAttrName(unsigned i) {
+            switch (i) {
+                case 0:
+                    return "static_crange";
+                case 1:
+                    return "static_qrange";
+                default:
+                    assert(false && "There are only 2 QData operands for the CNotOp!"); return "";
+            }
+        }
+
+        static std::pair<SmallVector<bool, 4>, unsigned> getRegLikeArray() {
+            return {SmallVector<bool, 4>({true, true}), 2};
+        }
+
+        static size_t getSegmentSizesArraySize() {
+            return 4;
+        }
     }];
 
     let printer = "return ::print(p, *this);";
-    let parser = "return ::prettyParseOp(parser, result);";
+    let parser = "return ::parseRegAccessOps<CNotOp>(parser, result);";
 }
 
 def TerminatorOp : Quantum_Op<"term", [Terminator]> {
@@ -525,7 +606,8 @@ def CircuitOp : Quantum_Op<"circ", [Unitary, ImplicitQuantumTerminator]> {
     let parser = "return ::parse$cppClass(parser, result);";
 }
 
-def ParametricCircuitOp : Quantum_Op<"parcirc", [DeclareOpInterfaceMethods<CallOpInterface>]> {
+def ParametricCircuitOp : Quantum_Op<"parcirc", [AttrSizedOperandSegments, RegAccessInterface,
+                                                 DeclareOpInterfaceMethods<CallOpInterface>]> {
     let summary = "Instatiate a parametric quantum circuit.";
     let description = [{
         In contrast to a basic circuit, a parametric circuit is created with the
@@ -551,9 +633,11 @@ def ParametricCircuitOp : Quantum_Op<"parcirc", [DeclareOpInterfaceMethods<CallO
     }];
 
     let arguments = (ins
+        Variadic<QData_Type> : $qbs,
+        Variadic<Index> : $ranges,
+        2dI64ArrayAttr : $static_ranges,
         FlatSymbolRefAttr : $callee,
-        Confined<APIntAttr, [IntPositive]> : $n,
-        Variadic<QData_Type> : $qbs
+        Confined<APIntAttr, [IntPositive]> : $n
     );
 
     let results = (outs
@@ -585,7 +669,7 @@ def ParametricCircuitOp : Quantum_Op<"parcirc", [DeclareOpInterfaceMethods<CallO
         auto funtype = typeattr.getValue().dyn_cast<FunctionType>();
 
         // compare number of arguments while ignoring parameter in function signature
-        if (funtype.getNumInputs()-1 != this->getNumOperands())
+        if (funtype.getNumInputs()-1 != this->qbs().size())
             this->emitError() << "Given number of function arguments does not match!"
                                  " Required: " << funtype.getNumInputs()-1 <<
                                  ". Got: " << this->getNumOperands() << ".";
@@ -621,6 +705,19 @@ def ParametricCircuitOp : Quantum_Op<"parcirc", [DeclareOpInterfaceMethods<CallO
     }];
 
     let extraClassDeclaration = [{
+        static StringRef getAccessorAttrName(unsigned i) {
+            assert(i == 0 && "There is only 1 QData operands for the ParametricCircuitOp!");
+            return "static_ranges";
+        }
+
+        static std::pair<SmallVector<bool, 4>, unsigned> getRegLikeArray() {
+            return {SmallVector<bool, 4>({true}), 1};
+        }
+
+        static size_t getSegmentSizesArraySize() {
+            return 2;
+        }
+
         Operation *resolveCallable() {
             // If the callable isn't a value, lookup the symbol reference.
             CallInterfaceCallable callable = this->getCallableForCallee();
@@ -630,9 +727,7 @@ def ParametricCircuitOp : Quantum_Op<"parcirc", [DeclareOpInterfaceMethods<CallO
         }
     }];
 
-    let assemblyFormat = [{
-        $callee `(` $n `,` $qbs `)` attr-dict `:` functional-type(operands, results)
-    }];
+    let parser = "return ::parseParCircOp(parser, result);";
 }
 
 def ApplyCircOp : Quantum_Op<"apply"> {
@@ -682,7 +777,7 @@ def ApplyCircOp : Quantum_Op<"apply"> {
     }];
 }
 
-def ControlOp : Quantum_Gate<"c", [Meta]> {
+def ControlOp : Quantum_Gate<"c", [Meta, AttrSizedOperandSegments, RegAccessInterface]> {
     let summary = "Control meta-op.";
     let description = [{
         This meta operation transforms a quantum op that has not been applied
@@ -717,7 +812,11 @@ def ControlOp : Quantum_Gate<"c", [Meta]> {
     let arguments = (ins
         QOp_Type : $heldOp,
         QData_Type: $ctrls,
-        Optional<QData_Type> : $qbs
+        Variadic<Index> : $crange,
+        Optional<QData_Type> : $qbs,
+        Variadic<Index> : $qrange,
+        I64ArrayAttr : $static_crange,
+        I64ArrayAttr : $static_qrange
         // Variadic<QData_Type> : $extractrls
     );
 
@@ -727,8 +826,8 @@ def ControlOp : Quantum_Gate<"c", [Meta]> {
 
     let additionalVerifier = [{
         // make sure target and control aren't identical (basic test, not comprehensive)
-        if (this->qbs() && this->qbs() == this->ctrls())
-            return this->emitError() << "Cannot use same qubits for control AND target!";
+        //if (this->qbs() && this->qbs() == this->ctrls())
+        //    return this->emitError() << "Cannot use same qubits for control AND target!";
 
         auto heldOp = this->heldOp().getType();
         // make sure user is not trying to apply a circuit op by specifying a target
@@ -747,6 +846,10 @@ def ControlOp : Quantum_Gate<"c", [Meta]> {
         else if (ctrls.isa<QuregType>())
             totalctrls += ctrls.cast<QuregType>().getNumQubits();
 
+        // disable # of ctrl qubits check when using register accessors
+        if (this->static_crange().size())
+            totalctrls = -1;
+
         //auto xtypes = this->extractrls().getTypes();
         //for (auto xtype : xtypes) {
         //    if (xtype.isa<QubitType>())
@@ -759,7 +862,7 @@ def ControlOp : Quantum_Gate<"c", [Meta]> {
         if (this->op()) {
             COpType output = this->op().getType().cast<COpType>();
             // assert correct number of control qubits
-            if (output.getNumCtrls() != totalctrls)
+            if (totalctrls != -1 && output.getNumCtrls() != totalctrls)
                 return this->emitError() << "Number of output controls doesn't match inputs!";
 
             // assert proper base type
@@ -773,11 +876,33 @@ def ControlOp : Quantum_Gate<"c", [Meta]> {
         }
     }];
 
+    let extraClassDeclaration = [{
+        static StringRef getAccessorAttrName(unsigned i) {
+            switch (i) {
+                case 0:
+                    return "static_crange";
+                case 1:
+                    return "static_qrange";
+                default:
+                    assert(false && "There are only 2 QData operands for the ControlOp!");
+                    return "";
+            }
+        }
+
+        static std::pair<SmallVector<bool, 4>, unsigned> getRegLikeArray() {
+            return {SmallVector<bool, 4>({false, true, true}), 2};
+        }
+
+        static size_t getSegmentSizesArraySize() {
+            return 5;
+        }
+    }];
+
     let printer = "return ::print(p, *this);";
-    let parser = "return ::prettyParseOp(parser, result);";
+    let parser = "return ::parseRegAccessOps<ControlOp>(parser, result);";
 }
 
-def AdjointOp : Quantum_Gate<"adj", [Meta]> {
+def AdjointOp : Quantum_Gate<"adj", [Meta, AttrSizedOperandSegments, RegAccessInterface]> {
     let summary = "(Hermitian) adjoint meta-op.";
     let description = [{
         This meta operation transforms a quantum op that has not been applied
@@ -808,7 +933,9 @@ def AdjointOp : Quantum_Gate<"adj", [Meta]> {
 
     let arguments = (ins
         QOp_Type : $heldOp,
-        Optional<QData_Type> : $qbs
+        Optional<QData_Type> : $qbs,
+        Variadic<Index> : $range,
+        I64ArrayAttr : $static_range
     );
 
     let results = (outs
@@ -823,8 +950,23 @@ def AdjointOp : Quantum_Gate<"adj", [Meta]> {
             return this->emitError() << "Circuit cannot be applied by specifying qubits!";
     }];
 
+    let extraClassDeclaration = [{
+        static StringRef getAccessorAttrName(unsigned i) {
+            assert(i == 0 && "There is only 1 QData operand for the AdjointOp!");
+                return "static_range";
+        }
+
+        static std::pair<SmallVector<bool, 4>, unsigned> getRegLikeArray() {
+            return {SmallVector<bool, 4>({false, true}), 1};
+        }
+
+        static size_t getSegmentSizesArraySize() {
+            return 3;
+        }
+    }];
+
     let printer = "return ::print(p, *this);";
-    let parser = "return ::prettyParseOp(parser, result);";
+    let parser = "return ::parseRegAccessOps<AdjointOp>(parser, result);";
 }
 
 #endif // QUANTUM_OPS

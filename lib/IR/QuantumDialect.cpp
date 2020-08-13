@@ -440,5 +440,7 @@ Operation::operand_range ParametricCircuitOp::getArgOperands() {
     return qbs();
 }
 
+#define GET_INTERFACE_CLASSES
+#include "QuantumInterfaces.cpp.inc"
 #define GET_OP_CLASSES
 #include "QuantumOps.cpp.inc"
