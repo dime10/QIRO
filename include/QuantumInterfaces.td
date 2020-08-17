@@ -14,19 +14,18 @@ def RegAccessInterface : OpInterface<"RegAccessInterface"> {
     }];
 
     let methods = [
-        StaticInterfaceMethod<"Parse the given number of quantum data (qubits, registers, lists) "
-                              "operands with optional accessors. Accessors are only parsed on "
-                              "registers and lists.",
-            "StringRef", "getAccessorAttrName", (ins "unsigned" : $n)
+        StaticInterfaceMethod<"Obtain the name of the i^th static range array attribute.",
+            "StringRef", "getAccessorAttrName", (ins "unsigned" : $idx)
         >,
-        StaticInterfaceMethod<"Parse the given number of quantum data (qubits, registers, lists) "
-                              "operands with optional accessors. Accessors are only parsed on "
-                              "registers and lists.",
+        StaticInterfaceMethod<"Obtain the names of all static range array attributes as a vector.",
+            "SmallVector<StringRef, 2>", "getAccessorAttrNames"
+        >,
+        StaticInterfaceMethod<"Get a boolean array that indicates for each ODS operand whether it "
+                              "is register-like, and thus has a corresponding range operand and "
+                              "attribute.",
             "std::pair<SmallVector<bool, 4>, unsigned>", "getRegLikeArray"
         >,
-        StaticInterfaceMethod<"Parse the given number of quantum data (qubits, registers, lists) "
-                              "operands with optional accessors. Accessors are only parsed on "
-                              "registers and lists.",
+        StaticInterfaceMethod<"Number of ODS operands.",
             "size_t", "getSegmentSizesArraySize"
         >
     ];
@@ -50,7 +49,7 @@ def RegAccessInterface : OpInterface<"RegAccessInterface"> {
                     else
                         accessorPresent = accessorAttr.size();
                     if (!argType.isa<QuregType>() && !argType.isa<QlistType>() && accessorPresent)
-                        concreteOp.emitError() << "Range specifiers are only allowed on register-like types!";
+                        return concreteOp.emitError() << "Range specifiers are only allowed on register-like types!";
                 }
                 i++;
             }

@@ -329,6 +329,10 @@ def HOp : Quantum_Gate<"H", [Unitary, Hermitian, AttrSizedOperandSegments, RegAc
             return "static_range";
         }
 
+        static SmallVector<StringRef, 2> getAccessorAttrNames() {
+            return {"static_range"};
+        }
+
         static std::pair<SmallVector<bool, 4>, unsigned> getRegLikeArray() {
             return {SmallVector<bool, 4>({true}), 1};
         }
@@ -338,7 +342,7 @@ def HOp : Quantum_Gate<"H", [Unitary, Hermitian, AttrSizedOperandSegments, RegAc
         }
     }];
 
-    let printer = "return ::print(p, *this);";
+    let printer = "return ::print<HOp>(p, *this);";
     let parser = "return ::parseRegAccessOps<HOp>(parser, result);";
 }
 
@@ -388,6 +392,10 @@ def XOp : Quantum_Gate<"X", [Unitary, Hermitian, AttrSizedOperandSegments, RegAc
             return "static_range";
         }
 
+        static SmallVector<StringRef, 2> getAccessorAttrNames() {
+            return {"static_range"};
+        }
+
         static std::pair<SmallVector<bool, 4>, unsigned> getRegLikeArray() {
             return {SmallVector<bool, 4>({true}), 1};
         }
@@ -397,7 +405,7 @@ def XOp : Quantum_Gate<"X", [Unitary, Hermitian, AttrSizedOperandSegments, RegAc
         }
     }];
 
-    let printer = "return ::print(p, *this);";
+    let printer = "return ::print<XOp>(p, *this);";
     let parser = "return ::parseRegAccessOps<XOp>(parser, result);";
 }
 
@@ -449,6 +457,10 @@ def RzOp : Quantum_Gate<"RZ", [Unitary, AttrSizedOperandSegments, RegAccessInter
             return "static_range";
         }
 
+        static SmallVector<StringRef, 2> getAccessorAttrNames() {
+            return {"static_range"};
+        }
+
         static std::pair<SmallVector<bool, 4>, unsigned> getRegLikeArray() {
             return {SmallVector<bool, 4>({true}), 1};
         }
@@ -458,7 +470,7 @@ def RzOp : Quantum_Gate<"RZ", [Unitary, AttrSizedOperandSegments, RegAccessInter
         }
     }];
 
-    let printer = "return ::print(p, *this);";
+    let printer = "return ::print<RzOp>(p, *this);";
     let parser = "return ::parseRegAccessOps<RzOp>(parser, result, true);";
 }
 
@@ -532,6 +544,10 @@ def CNotOp : Quantum_Gate<"CX", [Unitary, Hermitian, AttrSizedOperandSegments, R
             }
         }
 
+        static SmallVector<StringRef, 2> getAccessorAttrNames() {
+            return {"static_crange", "static_qrange"};
+        }
+
         static std::pair<SmallVector<bool, 4>, unsigned> getRegLikeArray() {
             return {SmallVector<bool, 4>({true, true}), 2};
         }
@@ -541,7 +557,7 @@ def CNotOp : Quantum_Gate<"CX", [Unitary, Hermitian, AttrSizedOperandSegments, R
         }
     }];
 
-    let printer = "return ::print(p, *this);";
+    let printer = "return ::print<CNotOp>(p, *this);";
     let parser = "return ::parseRegAccessOps<CNotOp>(parser, result);";
 }
 
@@ -710,6 +726,10 @@ def ParametricCircuitOp : Quantum_Op<"parcirc", [AttrSizedOperandSegments, RegAc
             return "static_ranges";
         }
 
+        static SmallVector<StringRef, 2> getAccessorAttrNames() {
+            return {"static_ranges"};
+        }
+
         static std::pair<SmallVector<bool, 4>, unsigned> getRegLikeArray() {
             return {SmallVector<bool, 4>({true}), 1};
         }
@@ -727,7 +747,8 @@ def ParametricCircuitOp : Quantum_Op<"parcirc", [AttrSizedOperandSegments, RegAc
         }
     }];
 
-    let parser = "return ::parseParCircOp(parser, result);";
+    let printer = "return ::print(p, *this);";
+    let parser = "return ::parse$cppClass(parser, result);";
 }
 
 def ApplyCircOp : Quantum_Op<"apply"> {
@@ -889,6 +910,10 @@ def ControlOp : Quantum_Gate<"c", [Meta, AttrSizedOperandSegments, RegAccessInte
             }
         }
 
+        static SmallVector<StringRef, 2> getAccessorAttrNames() {
+            return {"static_crange", "static_qrange"};
+        }
+
         static std::pair<SmallVector<bool, 4>, unsigned> getRegLikeArray() {
             return {SmallVector<bool, 4>({false, true, true}), 2};
         }
@@ -898,7 +923,7 @@ def ControlOp : Quantum_Gate<"c", [Meta, AttrSizedOperandSegments, RegAccessInte
         }
     }];
 
-    let printer = "return ::print(p, *this);";
+    let printer = "return ::print<ControlOp>(p, *this);";
     let parser = "return ::parseRegAccessOps<ControlOp>(parser, result);";
 }
 
@@ -953,7 +978,11 @@ def AdjointOp : Quantum_Gate<"adj", [Meta, AttrSizedOperandSegments, RegAccessIn
     let extraClassDeclaration = [{
         static StringRef getAccessorAttrName(unsigned i) {
             assert(i == 0 && "There is only 1 QData operand for the AdjointOp!");
-                return "static_range";
+            return "static_range";
+        }
+
+        static SmallVector<StringRef, 2> getAccessorAttrNames() {
+            return {"static_range"};
         }
 
         static std::pair<SmallVector<bool, 4>, unsigned> getRegLikeArray() {
@@ -965,7 +994,7 @@ def AdjointOp : Quantum_Gate<"adj", [Meta, AttrSizedOperandSegments, RegAccessIn
         }
     }];
 
-    let printer = "return ::print(p, *this);";
+    let printer = "return ::print<AdjointOp>(p, *this);";
     let parser = "return ::parseRegAccessOps<AdjointOp>(parser, result);";
 }
 
