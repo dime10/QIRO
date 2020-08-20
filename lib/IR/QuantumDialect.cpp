@@ -2,8 +2,11 @@
    e.g. operations, custom types, attributes etc. */
 
 #include "mlir/IR/DialectImplementation.h"
+#include "mlir/IR/AsmState.h"
 
 #include "QuantumDialect.h"
+
+#include <sstream>
 
 using namespace mlir;
 using namespace mlir::quantum;

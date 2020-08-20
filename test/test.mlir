@@ -6,44 +6,12 @@ module {
     %s = constant 2 : index
 
 
-    // test register operations (extracting qubit, slicing register, combining to register)
+    // test allocation ops
     %0 = "q.alloc"() : () -> !q.qubit
     %1 =  q.alloc -> !q.qubit
 
     %2 = "q.allocreg"() {size=4} : () -> !q.qureg<4>
     %3 =  q.allocreg(4) -> !q.qureg<4>
-
-    %4 = "q.extract"(%2) {idxAttr=2 : index} : (!q.qureg<4>) -> !q.qubit
-    %5 =  q.extract %2[[2]] : !q.qureg<4> -> !q.qubit
-    //q.extract %2[[4]] : !q.qureg<4> -> !q.qubit // index out of bounds
-    func @testextract(%l : !q.qlist, %r : !q.qureg<4>, %c : index) {
-        %20 = "q.extract"(%l) {idxAttr=0 : index} : (!q.qlist) -> !q.qubit
-        %21 = q.extract %l[[0]] : !q.qlist -> !q.qubit
-        %22 = "q.extract"(%l, %c) : (!q.qlist, index) -> !q.qubit
-        %23 = q.extract %l[%c] : !q.qlist, index -> !q.qubit
-        //q.extract %r[] : !q.qureg<4> -> !q.qubit              // no index supplied
-        //q.extract %r[[4] %c] : !q.qureg<4>, index -> !q.qubit // index supplied twice
-        //q.extract %r[%c] : !q.qureg<4>, index -> !q.qubit     // arg index supplied with qureg
-        q.term
-    }
-
-    %6 = "q.slice"(%2) {a=1, b=4} : (!q.qureg<4>) -> !q.qureg<3>
-    %7 =  q.slice %2[1, 4] : !q.qureg<4> -> !q.qureg<3>
-    //q.slice %2[1,2] : !q.qureg<4> -> !q.qureg<2> // range too small (min 2)
-    //q.slice %2[3,5] : !q.qureg<4> -> !q.qureg<2> // range out of bounds
-    //q.slice %2[1,3] : !q.qureg<4> -> !q.qureg<3> // range - type mismatch
-
-    %8 = "q.genreg"(%0, %2) : (!q.qubit, !q.qureg<4>) -> !q.qureg<5>
-    %9 =  q.genreg %0, %2 : !q.qubit, !q.qureg<4> -> !q.qureg<5>
-    %10 = "q.genreg"(%0, %2, %1) : (!q.qubit, !q.qureg<4>, !q.qubit) -> !q.qureg<6>
-    %11 =  q.genreg %0, %2, %1 : !q.qubit, !q.qureg<4>, !q.qubit -> !q.qureg<6>
-    //q.genreg %0, %2, %1 : !q.qubit, !q.qureg<4>, !q.qubit -> !q.qureg<8> // qubit num mismatch
-    func @testgenreg(%l : !q.qlist, %r : !q.qureg<4>) {
-        %20 = "q.genreg"(%l) : (!q.qlist) -> !q.qureg<7>
-        %21 = q.genreg %l : !q.qlist -> !q.qureg<7>
-        //q.genreg %l, %r : !q.qlist, !q.qureg<4> -> !q.qureg<7> // qlist: only 1 operand allowed
-        q.term
-    }
 
 
     // test basic gates, including their custom assembly formats
@@ -127,21 +95,39 @@ module {
     } -> !q.circ
 
 
+    // test register/list generation, commented trip the qubit/qureg/qlist invalidation verifiers
+    %10 = q.alloc -> !q.qubit
+    %11 = q.alloc -> !q.qubit
+    %12 = q.allocreg(4) -> !q.qureg<4>
+    %13 = q.allocreg(4) -> !q.qureg<4>
+    %14 = "q.genreg"(%10, %12) : (!q.qubit, !q.qureg<4>) -> !q.qureg<5>
+    %15 =  q.genreg %11, %13 : !q.qubit, !q.qureg<4> -> !q.qureg<5>
+    //q.genreg %0, %2, %1 : !q.qubit, !q.qureg<4>, !q.qubit -> !q.qureg<8> // qubit num mismatch
+    //q.genreg %1, %3 : !q.qubit, !q.qureg<4> -> !q.qureg<5>
+    //q.genreg %10, %3 : !q.qubit, !q.qureg<4> -> !q.qureg<5>
+    func @invalid(%q : !q.qubit, %r : !q.qureg<4>, %l1 : !q.qlist, %l2 : !q.qlist) -> !q.qlist {
+        q.genreg %q, %r : !q.qubit, !q.qureg<4> -> !q.qureg<5>
+        //q.X %q : !q.qubit
+        //q.H %r : !q.qureg<4>
+        //q.genlist %l1, %l2 : !q.qlist, !q.qlist -> !q.qlist
+        return %l1 : !q.qlist
+    }
+
+
     // test a parametrized circuit
     func @fun(%dummy : index, %qbs : !q.qlist) {
-        %reg = q.genreg %qbs : !q.qlist -> !q.qureg<4>
-        q.H %reg : !q.qureg<4>
+        q.H %qbs : !q.qlist
         q.term
     }
     func @fun2(%dummy : index, %qb : !q.qubit, %qbs : !q.qlist) {
-        %reg = q.genreg %qbs : !q.qlist -> !q.qureg<4>
         q.RZ(0.1) %qb : !q.qubit
-        q.H %reg : !q.qureg<4>
+        q.H %qbs : !q.qlist
         q.term
     }
     func @fun3(%dummy : index, %qbs0 : !q.qlist, %qb : !q.qubit, %qbs1 : !q.qlist) {
         q.term
     }
+
     %pc0 = "q.parcirc"(%0) {callee=@fun, n=1, operand_segment_sizes = dense<[1, 0]> : vector<2xi32>, static_ranges = []} : (!q.qubit) -> !q.circ
     %pc1 = q.parcirc @fun(1, %0) : !q.qubit -> !q.circ
     %pc2 = "q.parcirc"(%2) {callee=@fun, n=4, operand_segment_sizes = dense<[1, 0]> : vector<2xi32>, static_ranges = []} : (!q.qureg<4>) -> !q.circ
@@ -199,6 +185,7 @@ module {
     q.c %op0, %2[0], %2[1,3] : !q.op, !q.qureg<4>, !q.qureg<4>
     //q.c %op0, %0[1], %2[1,%b,2] : !q.op, !q.qubit, !q.qureg<4>  // illegal on anything but qureg
     //q.c %op0, %2[1,%b,2], %0[%s] : !q.op, !q.qureg<4>, !q.qubit // illegal on anything but qureg
+
 
     // test adjoint meta operation
     "q.adj"(%op0, %0) {operand_segment_sizes = dense<[1, 1, 0]> : vector<3xi32>, static_range = []} : (!q.op, !q.qubit) -> ()

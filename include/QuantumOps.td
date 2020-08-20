@@ -88,132 +88,13 @@ def AllocRegOp : Quantum_Op<"allocreg"> {
     }];
 }
 
-def ExtractOp : Quantum_Op<"extract", [NoSideEffect]> {
-    let summary = "Extract single qubit from register.";
-    let description = [{
-        This op allows to get out individual qubits from a register.
-        The register is passed as an argument, and the index as an attribute.
-        Also supports extraction from a Qlist, in conjuction with accepting
-        the index argument optionally as an ssa operand instead of attribute.
-
-        Example:
-
-        ```mlir
-        %0 = "q.allocreg"() {size=4} : () -> !q.qureg<4>
-        // Extract single qubit from register
-        %qb = "q.extract"(%0) {idx=2 : index} : (!q.qureg<4>) -> !q.qubit
-        // OR in custom assembly format
-        %qb = q.extract %0[[2]] : !q.qureg<4> -> !q.qubit
-        // Extract qubit from Qlist
-        func @foo(%l : !q.qlist) {
-            %c = constant 2 : index
-            %qb = "q.extract"(%l, %c) : (!q.qureg<4>, index) -> !q.qubit
-            // OR in custom assembly format
-            %qb = q.extract %l[%c] : !q.qlist, index -> !q.qubit
-        }
-    }];
-
-    let arguments = (ins
-        AnyTypeOf<[Qureg_Type, Qlist_Type]> : $reg,
-        OptionalAttr<Confined<IndexAttr, [IntNonNegative]>> : $idxAttr,
-        Optional<Index> : $idxArg
-    );
-
-    let results = (outs
-        Qubit_Type
-    );
-
-    let verifier = [{
-        if (this->idxAttr() && this->idxArg())
-            this->emitError() << "Can supply index as either attribute or operand, but not both!";
-        if (!this->idxAttr() && !this->idxArg())
-            this->emitError() << "Must supply an index (either via attribute or operand)!";
-
-        if (this->reg().getType().isa<QlistType>()) {
-            return success();
-        } else {
-            if (this->idxArg())
-                this->emitError() << "Operand index only supported on Qlist type!";
-        }
-
-        llvm::APInt idx = *(this->idxAttr());
-        unsigned regsize = this->reg().getType().cast<QuregType>().getNumQubits();
-
-        if (idx.uge(regsize))
-            return this->emitError() << "index out of bounds, got "
-                                     << "idx=" << *(idx.getRawData())
-                                     << ", regsize=" << regsize;
-
-        return success();
-    }];
-
-    let assemblyFormat = [{
-        $reg `[` (`[`$idxAttr^`]`)? ($idxArg^)? `]` attr-dict `:` type(operands) `->` type(results)
-    }];
-}
-
-def SliceRegOp : Quantum_Op<"slice", [NoSideEffect]> {
-    let summary = "Extract range of qubits from register.";
-    let description = [{
-        This op allows to extract a continous range of qubits from a register.
-        The register is passed as an argument, and the indeces as attributes.
-        The endpoint is included for the left index but NOT the right index.
-
-        Example:
-
-        ```mlir
-        %0 = "q.allocreg"() {size=4} : () -> !q.qureg<4>
-        // Extract range of qubits from register
-        %reg = "q.slice"(%0) {a=1, b=4} : (!q.qureg<4>) -> !q.qureg<3>
-        // OR in custom assembly format
-        %reg = q.slice %0[1,4] : !q.qureg<4> -> !q.qureg<3>
-    }];
-
-    let arguments = (ins
-        Qureg_Type : $reg,
-        Confined<APIntAttr, [IntNonNegative]> : $a,
-        Confined<APIntAttr, [IntNonNegative]> : $b
-    );
-
-    let results = (outs
-        Qureg_Type : $newreg
-    );
-
-    let verifier = [{
-        llvm::APInt a = this->a();
-        llvm::APInt b = this->b();
-        unsigned regsize = this->reg().getType().cast<QuregType>().getNumQubits();
-        unsigned newregsize = this->newreg().getType().cast<QuregType>().getNumQubits();
-
-        if (a.uge(regsize) || b.ugt(regsize))
-            return this->emitError() << "one or both indeces out of bounds, got "
-                                     << "a=" << *(a.getRawData())
-                                     << ", b=" << *(b.getRawData())
-                                     << ", regsize=" << regsize;
-        if ((b-a).slt(2))
-            return this->emitError() << "slice must include at least 2 elements, got "
-                                     << (long long) *((b-a).getRawData());
-        if ((b-a) != newregsize)
-            return this->emitError() << "output register has wrong size, got " << newregsize
-                                     << ", requires " << *((b-a).getRawData());
-
-        return success();
-    }];
-
-    let assemblyFormat = [{
-        $reg `[` $a `,` $b `]` attr-dict `:` type(operands) `->` type(results)
-    }];
-}
-
 def GenRegOp : Quantum_Op<"genreg", [NoSideEffect]> {
     let summary = "Generate a register from multiple qubits/quregs.";
     let description = [{
         This op allows to combine previously allocated qubits/quregs
         into a new register for the purpose of passing it to other operations.
-        Note that there is no checks against qubit overlap, that is putting
-        the same qubit into a register multiple times. This resposibility
-        is left to the code generating the IR, and thus the op should be
-        considered "internal".
+        All arguments given to this op will become ivalid and must not
+        used again. This is checked by a pass.
 
         Example:
 
@@ -224,17 +105,11 @@ def GenRegOp : Quantum_Op<"genreg", [NoSideEffect]> {
         %reg = "q.genreg"(%0, %1) : (!q.qubit, !q.qureg<2>) -> !q.qureg<3>
         // OR in custom assembly format
         %reg = q.genreg %0, %1 : !q.qubit, !q.qureg<2> -> !q.qureg<3>
-        // Cast Qlist to fixed-sized Qureg
-        func @foo(%l : !q.qlist) {
-            %reg = "q.genreg"(%l) : (!q.qlist) -> !q.qureg<7>
-            // OR in custom assembly format
-            %reg = q.genreg %l : !q.qlist -> !q.qureg<7>
         ```
     }];
 
     let arguments = (ins
-        QDataX_Type : $input1,
-        Variadic<QData_Type> : $extrainputs
+        Variadic<QData_Type> : $inputs
     );
 
     let results = (outs
@@ -242,28 +117,13 @@ def GenRegOp : Quantum_Op<"genreg", [NoSideEffect]> {
     );
 
     let verifier = [{
-        if (this->input1().getType().isa<QlistType>()) {
-            if (this->extrainputs().size())
-                this->emitError() << "Usage on Qlist reserved for cast to Qureg, "
-                                     "thus no additional inputs are allowed!";
-            return success();
-        }
-
         // obtain total number of qubits from input
         unsigned totalqbs = 0;
-
-        auto qbtype = this->input1().getType();
-        if (qbtype.isa<QubitType>())
-            totalqbs++;
-        else if (qbtype.isa<QuregType>())
-            totalqbs += qbtype.cast<QuregType>().getNumQubits();
-
-        auto xtypes = this->extrainputs().getTypes();
-        for (auto xtype : xtypes) {
-            if (xtype.isa<QubitType>())
+        for (auto argType : this->inputs().getTypes()) {
+            if (argType.isa<QubitType>())
                 totalqbs++;
-            else if (xtype.isa<QuregType>())
-                totalqbs += xtype.cast<QuregType>().getNumQubits();
+            else if (argType.isa<QuregType>())
+                totalqbs += argType.cast<QuregType>().getNumQubits();
         }
 
         // a register needs at least 2 qubits
@@ -273,7 +133,70 @@ def GenRegOp : Quantum_Op<"genreg", [NoSideEffect]> {
         // assert that this matches the output type
         unsigned declsize = this->newreg().getType().cast<QuregType>().getNumQubits();
         if (declsize != totalqbs)
-            return this->emitError() << "Number of qubits in the output doesn't match inputs!";
+            return this->emitError() << "Number of qubits in output type doesn't match inputs!";
+
+        // invalidate all arguments to this operation (no more uses beyond this point)
+        for (auto arg : this->inputs()) {
+            Value::user_range users = arg.getUsers();
+            if (dyn_cast_or_null<GenRegOp>(*users.begin()) != *this) {
+                std::string errMsg("Operand value ");
+                arg.printAsOperand(llvm::raw_string_ostream(errMsg), AsmState(this->getParentOp()));
+                errMsg += " is invalid beyond this op, but detected further use!";
+                return this->emitError() << errMsg;
+            }
+        }
+
+        return success();
+    }];
+
+    let assemblyFormat = [{
+        operands attr-dict `:` type(operands) `->` type(results)
+    }];
+}
+
+def GenListOp : Quantum_Op<"genlist", [NoSideEffect]> {
+    let summary = "Generate a qubit list from multiple lists.";
+    let description = [{
+        This op allows to combine previously allocated qubit lists into
+        a new list for the purpose of passing it to other operations.
+        All arguments given to this op will become ivalid and must not
+        used again. This is checked by a pass.
+
+        Example:
+
+        ```mlir
+        func @foo(%a : !q.list, %b : !q.list) {
+            // Generate new list by combining others
+            %ab = "q.genlist"(%a, %b) : (!q.qlist, !q.qlist) -> !q.list
+            // OR in custom assembly format
+            %ab = q.genlist %a, %b : !q.list, !q.list -> !q.list
+        }
+        ```
+    }];
+
+    let arguments = (ins
+        Variadic<Qlist_Type> : $inputs
+    );
+
+    let results = (outs
+        Qlist_Type
+    );
+
+    let verifier = [{
+        // needs at least two arguments
+        if (this->inputs().size() < 2)
+            return this->emitError() << "Give at least two arguments!";
+
+        // invalidate all arguments to this operation (no more uses beyond this point)
+        for (auto arg : this->inputs()) {
+            Value::user_range users = arg.getUsers();
+            if (dyn_cast_or_null<GenListOp>(*users.begin()) != *this) {
+                std::string errMsg("Operand value ");
+                arg.printAsOperand(llvm::raw_string_ostream(errMsg), AsmState(this->getParentOp()));
+                errMsg += " is invalid beyond this op, but detected further use!";
+                return this->emitError() << errMsg;
+            }
+        }
 
         return success();
     }];
