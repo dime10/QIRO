@@ -237,7 +237,7 @@ def HOp : Quantum_Gate<"H", [Unitary, Hermitian, AttrSizedOperandSegments, RegAc
     }];
 
     let arguments = (ins
-        Optional<QData_Type> : $qbs,
+        Optional<QDataX_Type> : $qbs,
         Variadic<Index> : $range,
         I64ArrayAttr : $static_range
     );
@@ -300,7 +300,7 @@ def XOp : Quantum_Gate<"X", [Unitary, Hermitian, AttrSizedOperandSegments, RegAc
     }];
 
     let arguments = (ins
-        Optional<QData_Type> : $qbs,
+        Optional<QDataX_Type> : $qbs,
         Variadic<Index> : $range,
         I64ArrayAttr : $static_range
     );
@@ -364,7 +364,7 @@ def RzOp : Quantum_Gate<"RZ", [Unitary, AttrSizedOperandSegments, RegAccessInter
     }];
 
     let arguments = (ins
-        Optional<QData_Type> : $qbs,
+        Optional<QDataX_Type> : $qbs,
         Variadic<Index> : $range,
         I64ArrayAttr : $static_range,
         APFloatAttr : $phi
@@ -434,9 +434,9 @@ def CNotOp : Quantum_Gate<"CX", [Unitary, Hermitian, AttrSizedOperandSegments, R
     }];
 
     let arguments = (ins
-        QData_Type : $ctrl,
+        QDataX_Type : $ctrl,
         Optional<Index> : $crange,
-        Optional<QData_Type> : $qbs,
+        Optional<QDataX_Type> : $qbs,
         Variadic<Index> : $qrange,
         I64ArrayAttr : $static_crange,
         I64ArrayAttr : $static_qrange
@@ -449,10 +449,10 @@ def CNotOp : Quantum_Gate<"CX", [Unitary, Hermitian, AttrSizedOperandSegments, R
     let additionalVerifier = [{
         //if (this->qbs() && this->qbs() == this->ctrl())
         //    return this->emitError() << "Cannot use same qubit for control AND target!";
-        if (this->ctrl().getType().isa<QuregType>() && (!this->crange() &&
-                                                         this->static_crange().size() != 1))
+        if ((this->ctrl().getType().isa<QuregType>() || this->ctrl().getType().isa<QlistType>()) &&
+            (!this->crange() && this->static_crange().size() != 1))
             return this->emitError() << "The control operand can only be a singular qubit, thus if "
-                                        "type is Qureg, must provide a single reg accessor index!";
+                                        "type is Qureg/Qlist, must provide 1 reg accessor index!";
     }];
 
     let extraClassDeclaration = [{
@@ -755,9 +755,9 @@ def ControlOp : Quantum_Gate<"c", [Meta, AttrSizedOperandSegments, RegAccessInte
 
     let arguments = (ins
         QOp_Type : $heldOp,
-        QData_Type: $ctrls,
+        QDataX_Type: $ctrls,
         Variadic<Index> : $crange,
-        Optional<QData_Type> : $qbs,
+        Optional<QDataX_Type> : $qbs,
         Variadic<Index> : $qrange,
         I64ArrayAttr : $static_crange,
         I64ArrayAttr : $static_qrange
@@ -789,6 +789,8 @@ def ControlOp : Quantum_Gate<"c", [Meta, AttrSizedOperandSegments, RegAccessInte
             totalctrls++;
         else if (ctrls.isa<QuregType>())
             totalctrls += ctrls.cast<QuregType>().getNumQubits();
+        else
+            totalctrls = -1; // disable # of ctrl qubits check when using qlist
 
         // disable # of ctrl qubits check when using register accessors
         if (this->static_crange().size())
@@ -881,7 +883,7 @@ def AdjointOp : Quantum_Gate<"adj", [Meta, AttrSizedOperandSegments, RegAccessIn
 
     let arguments = (ins
         QOp_Type : $heldOp,
-        Optional<QData_Type> : $qbs,
+        Optional<QDataX_Type> : $qbs,
         Variadic<Index> : $range,
         I64ArrayAttr : $static_range
     );
