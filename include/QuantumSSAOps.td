@@ -265,10 +265,9 @@ def CNotOp : QuantumSSA_Gate<"CX", [Unitary, Hermitian]> {
     );
 
     let additionalVerifier = [{
-        if (this->qbs()) {
-            // check that target and control are not the same
-            if (this->qbs() == this->ctrl())
-                return this->emitError() << "Cannot use same value for control AND target!";
+        // check that target and control are not the same
+        if (this->qbs() && this->qbs() == this->ctrl()) {
+            return this->emitError() << "Cannot use same value for control AND target!";
         }
     }];
 

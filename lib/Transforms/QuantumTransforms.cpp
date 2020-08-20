@@ -16,6 +16,17 @@ using namespace mlir::quantumssa;
 
 
 //===------------------------------------------------------------------------------------------===//
+// Utility functions
+//===------------------------------------------------------------------------------------------===//
+
+bool isQData(Type ty) {
+    return ty.isa<quantum::QubitType>() ||
+           ty.isa<quantum::QuregType>() ||
+           ty.isa<quantum::QlistType>();
+}
+
+
+//===------------------------------------------------------------------------------------------===//
 // Memory to Value semantics pass
 //===------------------------------------------------------------------------------------------===//
 
@@ -134,12 +145,6 @@ private:
         else      retType = convDialectType(op->getResult(0).getType(), builder, heldOp);
     }
 
-    static bool isQData(Type ty) {
-        return ty.isa<quantum::QubitType>() ||
-               ty.isa<quantum::QuregType>() ||
-               ty.isa<quantum::QlistType>();
-    }
-
 public:
     void runOnOperation() override {
         Operation *module = getOperation().getOperation();
@@ -225,7 +230,7 @@ public:
                 cast<FuncOp>(newOp).addEntryBlock();
 
                 // add new block argument values to the local storage
-                for (unsigned i = 0; i < cast<FuncOp>(op).getNumArguments(); i++) {
+                for (int i = 0; i < cast<FuncOp>(op).getNumArguments(); i++) {
                     if (isQData(fn.getArgument(i).getType()))
                         qbmap[fn.getArgument(i)] = cast<FuncOp>(newOp).getArgument(i);
                 }
@@ -260,7 +265,7 @@ public:
                 CallOp::build(opBuilder, opState, callee, resultTypes, operands);
                 newOp = opBuilder.createOperation(opState);
 
-                for (unsigned i = 0, j = 0; i < call.getNumOperands(); i++) {
+                for (int i = 0, j = 0; i < call.getNumOperands(); i++) {
                     if (isQData(op->getOperand(i).getType()))
                         qbmap[op->getOperand(i)] = newOp->getResult(j++);
                 }
@@ -302,7 +307,7 @@ public:
                 cast<FuncOp>(newfn).addEntryBlock();
 
                 // add new block argument values to the local storage
-                for (unsigned i = 0; i < externalOperands.size(); i++) {
+                for (int i = 0; i < externalOperands.size(); i++) {
                     if (isQData(externalOperands[i].getType()))
                         qbmap[externalOperands[i]] = cast<FuncOp>(newfn).getArgument(i);
                 }
@@ -360,7 +365,7 @@ public:
                 ApplyFunCircOp::build(opBuilder, opState, retTypes, applyOp.circ(), newOperands);
                 newOp = opBuilder.createOperation(opState);
 
-                for (unsigned i = 0, j = 0; i < oldOperands.size(); i++) {
+                for (int i = 0, j = 0; i < oldOperands.size(); i++) {
                     if (isQData(oldOperands[i].getType()))
                         qbmap[oldOperands[i]] = newOp->getResult(j++);
                 }
@@ -419,13 +424,13 @@ public:
 };
 } // end namespace
 
-// Register this pass to make it accessible to utilities like quantum-opt.
-static PassRegistration<MemToValPass> pass(
+// Register passes defined in this file to make them accessible to utilities like quantum-opt.
+static PassRegistration<MemToValPass> memValPass(
     "convert-mem-to-val",
     "Changes op mode from memory to value semantics, by module."
 );
 
-// Create a pass to convert from memory to value semantics
+// Pass creation functions declared in Passes.h
 std::unique_ptr<mlir::Pass> mlir::quantum::createMemToValPass() {
     return std::make_unique<MemToValPass>();
 }

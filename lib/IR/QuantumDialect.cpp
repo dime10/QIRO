@@ -202,6 +202,9 @@ mlir::Type QuantumDialect::parseType(mlir::DialectAsmParser &parser) const {
                 return nullptr;
         if (parser.parseGreater())
             return nullptr;
+        if (baseType && !(baseType.isa<OpType>() || baseType.isa<CircType>()))
+            parser.emitError(parser.getCurrentLocation(),
+                            "Base type of controlled op can only be supported quantum operations!");
         return COpType::get(this->getContext(), nctrl, baseType);
     }
     if (keyword == "circ")

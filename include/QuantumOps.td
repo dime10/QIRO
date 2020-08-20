@@ -434,7 +434,7 @@ def CNotOp : Quantum_Gate<"CX", [Unitary, Hermitian, AttrSizedOperandSegments, R
     }];
 
     let arguments = (ins
-        QDataX_Type : $ctrl,
+        QDataX_Type : $ctrl,            // only one qubit allowed, but with RegAccess need QDataX
         Optional<Index> : $crange,
         Optional<QDataX_Type> : $qbs,
         Variadic<Index> : $qrange,

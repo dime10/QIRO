@@ -41,7 +41,7 @@ module {
     %n = constant 5 : index
     call @newfun(%n, %0, %2, %1) : (index, !q.qubit, !q.qureg<4>, !q.qubit) -> ()
 
-    %circ = q.parcirc @newfun(3, %0, %2, %1) : (!q.qubit, !q.qureg<4>, !q.qubit) -> !q.circ
+    %circ = q.parcirc @newfun(3, %0, %2, %1) : !q.qubit, !q.qureg<4>, !q.qubit -> !q.circ
     q.apply %circ : !q.circ
 
     // test control meta operation, including on: ops, cops, and circs
