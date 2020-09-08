@@ -23,28 +23,12 @@ struct FunCircTypeStorage;
 #define GET_OP_CLASSES
 #include "QuantumSSAOps.h.inc"
 
-// MLIR types are represented by a *unique* value (for efficiency), which means all types must be
-// statically assigned a value by entering them in a global registry (DialectSymbolRegistry.def).
-// We can use PRIVATE_EXPERIMENTAL_0 (to 9) reserved for prototyping (each with a range of 256).
-namespace QuantumTypes {
-enum Kinds {
-    Qstate = mlir::Type::Kind::FIRST_PRIVATE_EXPERIMENTAL_1_TYPE,
-    Rstate,
-    Lstate,
-    Op,
-    COp,
-    FunCirc
-};
-}
-
 // This class represents the quantum state of one qubit at a single point in time.
-class QstateType : public Type::TypeBase<QstateType, mlir::Type> {
+class QstateType : public Type::TypeBase<QstateType, mlir::Type, mlir::TypeStorage> {
 public:
     using Base::Base;
 
-    static bool kindof(unsigned kind) { return kind == QuantumTypes::Qstate; }
-
-    static QstateType get(mlir::MLIRContext *ctx) { return Base::get(ctx, QuantumTypes::Qstate); }
+    static QstateType get(mlir::MLIRContext *ctx) { return Base::get(ctx); }
 };
 
 // This class represents the state of a quantum regist, which has a static size.
@@ -52,32 +36,26 @@ class RstateType : public Type::TypeBase<RstateType, mlir::Type, detail::RstateT
 public:
     using Base::Base;
 
-    static bool kindof(unsigned kind) { return kind == QuantumTypes::Rstate; }
-
     static RstateType get(mlir::MLIRContext *ctx, unsigned size);
 
     unsigned RstateType::getNumQubits();
 };
 
 // This class represents the state of quantum list, i.e. qubit register without declared size.
-class LstateType : public Type::TypeBase<LstateType, mlir::Type> {
+class LstateType : public Type::TypeBase<LstateType, mlir::Type, mlir::TypeStorage> {
 public:
     using Base::Base;
 
-    static bool kindof(unsigned kind) { return kind == QuantumTypes::Lstate; }
-
-    static LstateType get(mlir::MLIRContext *ctx) { return Base::get(ctx, QuantumTypes::Lstate); }
+    static LstateType get(mlir::MLIRContext *ctx) { return Base::get(ctx); }
 };
 
 // This class represents a singular quantum operation (such as a gate).
-class OpType : public Type::TypeBase<OpType, mlir::Type> {
+class OpType : public Type::TypeBase<OpType, mlir::Type, mlir::TypeStorage> {
 public:
     using Base::Base;
 
-    static bool kindof(unsigned kind) { return kind == QuantumTypes::Op; }
-
     static OpType get(mlir::MLIRContext *ctx) {
-        return Base::get(ctx, QuantumTypes::Op);
+        return Base::get(ctx);
     }
 };
 
@@ -86,8 +64,6 @@ public:
 class COpType : public Type::TypeBase<COpType, mlir::Type, detail::COpTypeStorage> {
 public:
     using Base::Base;
-
-    static bool kindof(unsigned kind) { return kind == QuantumTypes::COp; }
 
     static COpType get(mlir::MLIRContext *ctx, unsigned nctrl, Type baseType);
 
@@ -100,8 +76,6 @@ public:
 class FunCircType : public Type::TypeBase<FunCircType, mlir::Type, detail::FunCircTypeStorage> {
 public:
     using Base::Base;
-
-    static bool kindof(unsigned kind) { return kind == QuantumTypes::FunCirc; }
 
     static FunCircType get(mlir::MLIRContext *ctx, FunctionType funtype);
 

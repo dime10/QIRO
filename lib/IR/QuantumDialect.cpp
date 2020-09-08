@@ -3,6 +3,7 @@
 
 #include "mlir/IR/DialectImplementation.h"
 #include "mlir/IR/AsmState.h"
+#include "llvm/ADT/TypeSwitch.h"
 
 #include "QuantumDialect.h"
 
@@ -16,19 +17,14 @@ using namespace mlir::quantum;
 // Dialect Definitions
 //===------------------------------------------------------------------------------------------===//
 
-// Define the Dialect contructor. This is the point of registration of
-// all custom types, operations, attributes, etc. for the dialect.
-QuantumDialect::QuantumDialect(mlir::MLIRContext *ctx) : mlir::Dialect("q", ctx) {
-    // these templated methods are from the mlir::Dialect class
+// latest changes in MLIR upstream now only require this function for op, type, etc. registration
+void QuantumDialect::initialize() {
     addOperations<
         #define GET_OP_LIST
         #include "QuantumOps.cpp.inc"
     >();
 
-    addTypes<QubitType, QuregType, QlistType, OpType, COpType, CircType>();  // in mlir::quantum
-
-    // addAttributes<QuantumAttribute>();
-    // addInterfaces<QuantumInterface>();
+    addTypes<QubitType, QuregType, QlistType, OpType, COpType, CircType>();
 }
 
 namespace mlir {
@@ -99,7 +95,7 @@ struct COpTypeStorage : public mlir::TypeStorage {
 // Qureg
 QuregType QuregType::get(mlir::MLIRContext *ctx, unsigned size) {
     // Parameters to the storage class are passed after the custom type kind.
-    return Base::get(ctx, QuantumTypes::Qureg, size);
+    return Base::get(ctx, size);
 }
 
 unsigned QuregType::getNumQubits() {
@@ -110,7 +106,7 @@ unsigned QuregType::getNumQubits() {
 // COp
 COpType COpType::get(mlir::MLIRContext *ctx, unsigned nctrl, mlir::Type baseType) {
     // Parameters to the storage class are passed after the custom type kind.
-    return Base::get(ctx, QuantumTypes::COp, nctrl, baseType);
+    return Base::get(ctx, nctrl, baseType);
 }
 
 unsigned COpType::getNumCtrls() {
@@ -130,36 +126,18 @@ Type COpType::getBaseType() {
 
 // Print an instance of a type registered in the Quantum dialect.
 void QuantumDialect::printType(mlir::Type type, mlir::DialectAsmPrinter &printer) const {
-    // Differentiate between the Quantum types via their kinds and print accordingly.
-    switch (type.getKind()) {
-    case QuantumTypes::Qubit:
-        printer << "qubit";
-        break;
-    case QuantumTypes::Qureg: {
-        QuregType ctype = type.cast<QuregType>();
-        printer << "qureg<" << ctype.getNumQubits() << ">";
-        break;
-    }
-    case QuantumTypes::Qlist:
-        printer << "qlist";
-        break;
-    case QuantumTypes::Op:
-        printer << "op";
-        break;
-    case QuantumTypes::COp: {
-        COpType ctype = type.cast<COpType>();
-        printer << "cop<" << ctype.getNumCtrls();
-        if (ctype.getBaseType())
-            printer << ", " << ctype.getBaseType();
-        printer << ">";
-        break;
-    }
-    case QuantumTypes::Circ:
-        printer << "circ";
-        break;
-    default:
-        throw "unrecognized type encountered in the printer!";
-    }
+    // Differentiate between the Quantum types and print accordingly.
+    llvm::TypeSwitch<mlir::Type>(type)
+        .Case<QubitType>([&](QubitType)   { printer << "qubit"; })
+        .Case<QuregType>([&](QuregType t) { printer << "qureg<" << t.getNumQubits() << ">"; })
+        .Case<QlistType>([&](QlistType)   { printer << "qlist"; })
+        .Case<OpType>([&](OpType)         { printer << "op"; })
+        .Case<COpType>([&](COpType t)     { printer << "cop<" << t.getNumCtrls();
+                                            if (t.getBaseType())
+                                                printer << ", " << t.getBaseType();
+                                            printer << ">"; })
+        .Case<CircType>([&](CircType)     { printer << "circ"; })
+        .Default([](Type) { llvm_unreachable("unrecognized type encountered in the printer!"); });
 }
 
 // Parse an instance of a type registered to the Quantum dialect.

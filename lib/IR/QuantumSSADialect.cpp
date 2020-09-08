@@ -2,6 +2,7 @@
    e.g. operations, custom types, attributes etc. */
 
 #include "mlir/IR/DialectImplementation.h"
+#include "llvm/ADT/TypeSwitch.h"
 
 #include "QuantumSSADialect.h"
 
@@ -13,10 +14,8 @@ using namespace mlir::quantumssa;
 // Dialect Definitions
 //===------------------------------------------------------------------------------------------===//
 
-// Define the Dialect contructor. This is the point of registration of
-// all custom types, operations, attributes, etc. for the dialect.
-QuantumSSADialect::QuantumSSADialect(mlir::MLIRContext *ctx) : mlir::Dialect("qs", ctx) {
-    // these templated methods are from the mlir::Dialect class
+// latest changes in MLIR upstream now only require this function for op, type, etc. registration
+void QuantumSSADialect::initialize() {
     addOperations<
         #define GET_OP_LIST
         #include "QuantumSSAOps.cpp.inc"
@@ -112,7 +111,7 @@ struct FunCircTypeStorage : public mlir::TypeStorage {
 // Rstate
 RstateType RstateType::get(mlir::MLIRContext *ctx, unsigned size) {
     // Parameters to the storage class are passed after the custom type kind.
-    return Base::get(ctx, QuantumTypes::Rstate, size);
+    return Base::get(ctx, size);
 }
 
 unsigned RstateType::getNumQubits() {
@@ -123,7 +122,7 @@ unsigned RstateType::getNumQubits() {
 // COp
 COpType COpType::get(mlir::MLIRContext *ctx, unsigned nctrl, mlir::Type baseType) {
     // Parameters to the storage class are passed after the custom type kind.
-    return Base::get(ctx, QuantumTypes::COp, nctrl, baseType);
+    return Base::get(ctx, nctrl, baseType);
 }
 
 unsigned COpType::getNumCtrls() {
@@ -139,7 +138,7 @@ Type COpType::getBaseType() {
 // FunCirc
 FunCircType FunCircType::get(mlir::MLIRContext *ctx, FunctionType funtype) {
     // Parameters to the storage class are passed after the custom type kind.
-    return Base::get(ctx, QuantumTypes::FunCirc, funtype);
+    return Base::get(ctx, funtype);
 }
 
 FunctionType FunCircType::getFunType() {
@@ -154,36 +153,18 @@ FunctionType FunCircType::getFunType() {
 
 // Print an instance of a type registered in the Quantum dialect.
 void QuantumSSADialect::printType(mlir::Type type, mlir::DialectAsmPrinter &printer) const {
-    // Differentiate between the Quantum types via their kinds and print accordingly.
-    switch (type.getKind()) {
-    case QuantumTypes::Qstate:
-        printer << "qstate";
-        break;
-    case QuantumTypes::Rstate: {
-        RstateType ctype = type.cast<RstateType>();
-        printer << "rstate<" << ctype.getNumQubits() << ">";
-        break;
-    }
-    case QuantumTypes::Lstate:
-        printer << "lstate";
-        break;
-    case QuantumTypes::Op:
-        printer << "op";
-        break;
-    case QuantumTypes::COp: {
-        COpType ctype = type.cast<COpType>();
-        printer << "cop<" << ctype.getNumCtrls();
-        if (ctype.getBaseType())
-            printer << ", " << ctype.getBaseType();
-        printer << ">";
-        break;
-    }
-    case QuantumTypes::FunCirc:
-        printer << "fcirc<" << type.dyn_cast<FunCircType>().getFunType() << ">";
-        break;
-    default:
-        throw "unrecognized type encountered in the printer!";
-    }
+    // Differentiate between the Quantum types and print accordingly.
+    llvm::TypeSwitch<mlir::Type>(type)
+        .Case<QstateType>([&](QstateType)     { printer << "qstate"; })
+        .Case<RstateType>([&](RstateType t)   { printer << "rstate<" << t.getNumQubits() << ">"; })
+        .Case<LstateType>([&](LstateType)     { printer << "lstate"; })
+        .Case<OpType>([&](OpType)             { printer << "op"; })
+        .Case<COpType>([&](COpType t)         { printer << "cop<" << t.getNumCtrls();
+                                                if (t.getBaseType())
+                                                    printer << ", " << t.getBaseType();
+                                                printer << ">"; })
+        .Case<FunCircType>([&](FunCircType t) { printer << "fcirc<" << t.getFunType() << ">"; })
+        .Default([](Type) { llvm_unreachable("unrecognized type encountered in the printer!"); });
 }
 
 // Parse an instance of a type registered to the Quantum dialect.
