@@ -541,8 +541,9 @@ def CircuitOp : Quantum_Op<"circ", [Unitary, ImplicitQuantumTerminator]> {
         SizedRegion<1> : $gates
     );
 
-    let printer = "return ::print(p, *this);";
-    let parser = "return ::parse$cppClass(parser, result);";
+    let assemblyFormat = [{
+        (`(` $name^ `)`)? regions attr-dict `->` type(results)
+    }];
 }
 
 def ParametricCircuitOp : Quantum_Op<"parcirc", [AttrSizedOperandSegments, RegAccessInterface,

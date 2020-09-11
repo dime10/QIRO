@@ -194,66 +194,6 @@ mlir::Type QuantumDialect::parseType(mlir::DialectAsmParser &parser) const {
 
 
 //===------------------------------------------------------------------------------------------===//
-// Custom CircuitOp assembly format
-//===------------------------------------------------------------------------------------------===//
-
-static void print(OpAsmPrinter &p, CircuitOp op) {
-    p << op.getOperationName();
-    if (op.getAttr("name")) {
-        p << "(";
-        p.printAttributeWithoutType(op.nameAttr());
-        p << ")";
-    }
-    p.printRegion(op.gates(), /*printEntryBlockArgs=*/false, /*printBlockTerminators=*/false);
-    p.printOptionalAttrDict(op.getAttrs(), /*elidedAttrs=*/{"name"});
-    p << " -> " << op.getType();
-}
-
-static ParseResult parseCircuitOp(OpAsmParser &p, OperationState &result) {
-    auto &builder = p.getBuilder();
-
-    // parse optional 'name' attribute as "function argument"
-    if (succeeded(p.parseOptionalLParen())) {
-        StringAttr nameAttr;
-        if (p.parseAttribute(nameAttr, "name", result.attributes))
-            return failure();
-        if (p.parseRParen())
-            return failure();
-    }
-
-    // Parse the body region.
-    Region *body = result.addRegion();
-    if (p.parseRegion(*body, {}, {}))
-        return failure();
-
-    CircuitOp::ensureTerminator(*body, builder, result.location);
-
-    // Parse the optional attribute list.
-    if (p.parseOptionalAttrDict(result.attributes))
-        return failure();
-
-    // Parse return type
-    Type type;
-    llvm::SMLoc trailingTypeLoc;
-    if (p.parseArrow() || p.getCurrentLocation(&trailingTypeLoc) || p.parseType(type))
-        return failure();
-
-    // Extract the result type from the trailing function type.
-    auto funcType = type.dyn_cast<FunctionType>();
-    if (funcType) {
-        if (funcType.getNumInputs() != 0 || funcType.getNumResults() != 1)
-            return p.emitError(trailingTypeLoc,
-                "expected trailing function type with no argument and one result");
-        result.addTypes({funcType.getResult(0)});
-    } else {
-        result.addTypes({type});
-    }
-
-    return success();
-}
-
-
-//===------------------------------------------------------------------------------------------===//
 // Static parse helper methods for the register access interface
 //===------------------------------------------------------------------------------------------===//
 
