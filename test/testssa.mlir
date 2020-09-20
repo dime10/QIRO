@@ -1,4 +1,7 @@
-// new module to test value semantics
+//===------------------------------------------------------------------------------------------===//
+// Test module for the value semantics the QuantumSSA dialect
+//===------------------------------------------------------------------------------------------===//
+
 module {
     %q0_0 = qs.alloc -> !qs.qstate
     %r0_0 = qs.allocreg(4) -> !qs.rstate<4>
@@ -43,8 +46,8 @@ module {
 
     // execute the function circuits
     %q0_9 = call @retTest(%q0_8) : (!qs.qstate) -> !qs.qstate
-    %q0_10 = qs.applyfc %circ(%q0_9) : !qs.fcirc<(!qs.qstate) -> !qs.qstate>
-    %q0_11 = qs.applyfc %ccirc(%q0_10) : !qs.cop<1, !qs.fcirc<(!qs.qstate) -> !qs.qstate>>
-    %q0_12 = qs.applyfc %acirc(%q0_11) : !qs.fcirc<(!qs.qstate) -> !qs.qstate>
+    %q0_10 = qs.applyfc %circ(%q0_9) : !qs.fcirc<(!qs.qstate) -> !qs.qstate>, !qs.qstate -> !qs.qstate
+    %q0_11 = qs.applyfc %ccirc(%q0_10) : !qs.cop<1, !qs.fcirc<(!qs.qstate) -> !qs.qstate>>, !qs.qstate -> !qs.qstate
+    %q0_12 = qs.applyfc %acirc(%q0_11) : !qs.fcirc<(!qs.qstate) -> !qs.qstate>, !qs.qstate -> !qs.qstate
     //%q0_13 = qs.applyfc %ch(%q0_12) : !qs.cop<1, !qs.op>> // only works on fcirc(-derived) types
 }

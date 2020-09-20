@@ -48,8 +48,8 @@ def RegAccessInterface : OpInterface<"RegAccessInterface"> {
                         accessorPresent = j < accessorAttr.size() ? accessorAttr[j].cast<ArrayAttr>().size() : false;
                     else
                         accessorPresent = accessorAttr.size();
-                    if (!argType.isa<QuregType>() && !argType.isa<QlistType>() && accessorPresent)
-                        return concreteOp.emitError() << "Range specifiers are only allowed on register-like types!";
+                    if (!argType.isa<QuregType>() && accessorPresent)
+                        return concreteOp.emitError() << "Range specifiers are only allowed on register types!";
                 }
                 i++;
             }

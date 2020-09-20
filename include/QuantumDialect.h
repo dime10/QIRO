@@ -60,17 +60,10 @@ public:
     // required for uniquing which will be passed to the container (storage) class.
     // It will also assert that all of the construction invariants are satisfied by
     // calling 'verifyContructionInvariants'. To gracefully handle errors, use getChecked.
-    static QuregType get(mlir::MLIRContext *ctx, unsigned size);
+    static QuregType get(mlir::MLIRContext *ctx, llvm::Optional<int> size);
 
     // Return the register size
-    unsigned getNumQubits();
-};
-
-// This class represents a quantum register with undeclared size, for use with parametric circuits.
-class QlistType : public Type::TypeBase<QlistType, mlir::Type, mlir::TypeStorage> {
-public:
-    using Base::Base;
-    static QlistType get(mlir::MLIRContext *ctx) { return Base::get(ctx); }
+    llvm::Optional<int> getNumQubits();
 };
 
 // This class represents a singular quantum operation (such as a gate).

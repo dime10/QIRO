@@ -24,7 +24,7 @@ void QuantumDialect::initialize() {
         #include "QuantumOps.cpp.inc"
     >();
 
-    addTypes<QubitType, QuregType, QlistType, OpType, COpType, CircType>();
+    addTypes<QubitType, QuregType, OpType, COpType, CircType>();
 }
 
 namespace mlir {
@@ -35,21 +35,23 @@ struct QuregTypeStorage : public mlir::TypeStorage {
     // The `KeyTy` is a required type that provides an interface for the storage instance.
     // This type will be used when uniquing an instance of the type storage. For our Qureg
     // type, we will unique each instance on its size.
-    using KeyTy = unsigned;
+    using KeyTy = int;
 
     // Size of the qubit register
-    unsigned size;
+    llvm::Optional<int> size;
 
     // A constructor for the type storage instance.
-    QuregTypeStorage(unsigned size) {
-        assert(size > 1 && "Register type must have size > 1!");
+    QuregTypeStorage(llvm::Optional<int> size) {
+        assert(!size || *size > 1 && "Register type must have size > 1!");
         this->size = size;
     }
 
     // Define the comparison function for the key type with the current storage instance.
     // This is used when constructing a new instance to ensure that we haven't already
     // uniqued an instance of the given key.
-    bool operator==(const KeyTy &key) const { return key == size; }
+    bool operator==(const KeyTy &key) const {
+        return size == (key < 0 ? llvm::None : llvm::Optional<int>(key));
+    }
 
     // Define a construction method for creating a new instance of this storage.
     // This method takes an instance of a storage allocator, and an instance of a `KeyTy`.
@@ -57,7 +59,8 @@ struct QuregTypeStorage : public mlir::TypeStorage {
     // create the type storage and its internal.
     static QuregTypeStorage *construct(mlir::TypeStorageAllocator &allocator, const KeyTy &key) {
         // Allocate the storage instance and construct it.
-        return new (allocator.allocate<QuregTypeStorage>()) QuregTypeStorage(key);
+        llvm::Optional<int> size = key < 0 ? llvm::None : llvm::Optional<int>(key);
+        return new (allocator.allocate<QuregTypeStorage>()) QuregTypeStorage(size);
     }
 };
 
@@ -93,12 +96,13 @@ struct COpTypeStorage : public mlir::TypeStorage {
 //===------------------------------------------------------------------------------------------===//
 
 // Qureg
-QuregType QuregType::get(mlir::MLIRContext *ctx, unsigned size) {
+QuregType QuregType::get(mlir::MLIRContext *ctx, llvm::Optional<int> size) {
     // Parameters to the storage class are passed after the custom type kind.
-    return Base::get(ctx, size);
+    detail::QuregTypeStorage::KeyTy key = size ? *size : -1;
+    return Base::get(ctx, key);
 }
 
-unsigned QuregType::getNumQubits() {
+llvm::Optional<int> QuregType::getNumQubits() {
     // 'getImpl' returns a pointer to our internal storage instance.
     return getImpl()->size;
 }
@@ -129,12 +133,14 @@ void QuantumDialect::printType(mlir::Type type, mlir::DialectAsmPrinter &printer
     // Differentiate between the Quantum types and print accordingly.
     llvm::TypeSwitch<mlir::Type>(type)
         .Case<QubitType>([&](QubitType)   { printer << "qubit"; })
-        .Case<QuregType>([&](QuregType t) { printer << "qureg<" << t.getNumQubits() << ">"; })
-        .Case<QlistType>([&](QlistType)   { printer << "qlist"; })
+        .Case<QuregType>([&](QuregType t) { printer << "qureg<";
+                                            if (auto numQubits = t.getNumQubits())
+                                                 printer << *numQubits;
+                                            printer << ">"; })
         .Case<OpType>([&](OpType)         { printer << "op"; })
         .Case<COpType>([&](COpType t)     { printer << "cop<" << t.getNumCtrls();
-                                            if (t.getBaseType())
-                                                printer << ", " << t.getBaseType();
+                                            if (auto baseType = t.getBaseType())
+                                                printer << ", " << baseType;
                                             printer << ">"; })
         .Case<CircType>([&](CircType)     { printer << "circ"; })
         .Default([](Type) { llvm_unreachable("unrecognized type encountered in the printer!"); });
@@ -155,17 +161,17 @@ mlir::Type QuantumDialect::parseType(mlir::DialectAsmParser &parser) const {
     if (keyword == "qubit")
         return QubitType::get(this->getContext());
     if (keyword == "qureg") {
-        unsigned size;
+        int size;
         if (parser.parseLess())
             return nullptr;
-        if (parser.parseInteger<unsigned>(size))
+        auto res = parser.parseOptionalInteger<int>(size);
+        if (res.hasValue() && failed(res.getValue()))
             return nullptr;
         if (parser.parseGreater())
             return nullptr;
-        return QuregType::get(this->getContext(), size);
+        llvm::Optional<int> optionalSize = res.hasValue() ? llvm::Optional<int>(size) : llvm::None;
+        return QuregType::get(this->getContext(), optionalSize);;
     }
-    if (keyword == "qlist")
-        return QlistType::get(this->getContext());
     if (keyword == "op")
         return OpType::get(this->getContext());
     if (keyword == "cop") {
@@ -235,9 +241,9 @@ static ParseResult parseOperandOrIntAttrList(OpAsmParser &parser, OperationState
     return success();
 }
 
-// Parse any operands and add them to the allOperands list. If any of them are of qureg or qlist
-// type, additionally try to parse a register accessor list. For every such operand, we also need
-// to populate the corresponding array attribute that specifies how many (if any) accessors are
+// Parse any operands and add them to the allOperands list. If any of them are of qureg type,
+// additionally try to parse a register accessor list. For every such operand, we also need to
+// populate the corresponding array attribute that specifies how many (if any) accessors are
 // constants. Get the attribute names from the interface method.
 // Also populate the 'getOperandSegmentSizeAttr' for multiple variadic operands ops.
 template<typename OpClass>
@@ -440,8 +446,8 @@ static void print(OpAsmPrinter &p, ParametricCircuitOp op) {
 // This parse function can be used with all quantum ops that implement the RegAccessInterface.
 // It parses all available operands and their types in the pretty parse format of quantum gates,
 // with the addition of allowing a list of accessors indeces (Index value OR integer constant)
-// for each of the operands of type 'qureg' or 'qlist'. Note that the type of the indeces (if given
-// as SSA value) must not be specified, and is assumed to be IndexType.
+// for each of the operands of type 'qureg'. Note that the type of the indeces (if given as SSA
+// value) must not be specified, and is assumed to be IndexType.
 template<typename OpClass>
 static ParseResult parseRegAccessOps(OpAsmParser &p, OperationState &result, bool param = false) {
     // The most operands a gate can have is: heldOp (1), ctrl (1+3), trgt (1+3) = 9

@@ -353,16 +353,7 @@ def FunCircOp : QuantumSSA_Op<"funcirc"> {
     }];
 }
 
-def ApplyFunCircOp : QuantumSSA_Op<"applyfc", [
-            TypesMatchWith<"callee input types match argument types",
-                           "callee", "operands",
-                           "ApplyFunCircOp::getInputsSafe($_self)"
-                           >,
-            TypesMatchWith<"callee result types match result types",
-                           "callee", "results",
-                           "ApplyFunCircOp::getResultsSafe($_self)"
-                           >
-        ]> {
+def ApplyFunCircOp : QuantumSSA_Op<"applyfc"> {
     let summary = "Apply function circuits & derivates.";
     let description = [{
         This operation used to apply a "function circuit" at the current location. It's
@@ -385,23 +376,42 @@ def ApplyFunCircOp : QuantumSSA_Op<"applyfc", [
     );
 
     let verifier = [{
-        auto callee = this->callee().getType();
-        if (callee.isa<COpType>()) {
-            callee = callee.cast<COpType>().getBaseType();
-            if (!callee || !callee.isa<FunCircType>())
+        Type circType = this->callee().getType();
+        if (auto copType = circType.dyn_cast<COpType>()) {
+            circType = copType.getBaseType();
+            if (!circType || !circType.isa<FunCircType>())
                 return this->emitError() << "This op can only be applied to (fun.) circuit types!";
         }
+
+        auto funargTypes = circType.cast<FunCircType>().getFunType().getInputs();
+        auto funresTypes = circType.cast<FunCircType>().getFunType().getResults();
+
+        MLIRContext *ctx = getContext();
+        if (filterRegSize(funargTypes, ctx) != filterRegSize(this->operands().getType(), ctx))
+            return emitOpError("failed to verify that callee input types match argument types!");
+        if (filterRegSize(funresTypes, ctx) != filterRegSize(this->results().getType(), ctx))
+            return emitOpError("failed to verify that callee result types match result types!");
 
         return success();
     }];
 
     let extraClassDeclaration = [{
-        static ArrayRef<Type> getInputsSafe(Type callee);
-        static ArrayRef<Type> getResultsSafe(Type callee);
+        static TypeRange filterRegSize(TypeRange types, MLIRContext *ctx) {
+            Type rstate = RstateType::get(ctx, llvm::None);
+            llvm::SmallVector<Type, 8> filteredTypes;
+            filteredTypes.reserve(types.size());
+            for (auto type : types) {
+                if (type.isa<RstateType>())
+                    filteredTypes.push_back(rstate);
+                else
+                    filteredTypes.push_back(type);
+            }
+            return filteredTypes;
+        }
     }];
 
     let assemblyFormat = [{
-        $callee `(` $operands `)` attr-dict `:` type($callee)
+        $callee `(` $operands `)` attr-dict `:` type(operands) `->` type(results)
     }];
 }
 
@@ -467,16 +477,22 @@ def ControlOp : QuantumSSA_Gate<"c", [Meta]> {
             totalctrls += heldOp.cast<COpType>().getNumCtrls();
 
         auto ctrls = this->ctrls().getType();
-        if (ctrls.isa<QstateType>())
+        if (ctrls.isa<QstateType>()) {
             totalctrls++;
-        else if (ctrls.isa<RstateType>())
-            totalctrls += ctrls.cast<RstateType>().getNumQubits();
+        } else if (auto regType = ctrls.dyn_cast<RstateType>()) {
+            if (auto numQubits = regType.getNumQubits())
+                totalctrls += *numQubits;
+            else
+                totalctrls = -1; // disable # of ctrl qubits check when no size is provided
+        } else {
+            assert(false && "Unknown data-type encountered in ControlOp!");
+        }
 
         // perform several checks on the return type, if it is a COpType
-        if (this->res() && this->res().getType().isa<COpType>()) {
+        if (this->res().getType().isa<COpType>()) {
             COpType output = this->res().getType().cast<COpType>();
             // assert correct number of control qubits
-            if (output.getNumCtrls() != totalctrls)
+            if (totalctrls != -1 && output.getNumCtrls() != totalctrls)
                 return this->emitError() << "Number of output controls doesn't match inputs!";
 
             // assert proper base type

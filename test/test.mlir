@@ -1,4 +1,7 @@
-// test module for all quantum operations, commented ops are supposed to fail
+//===------------------------------------------------------------------------------------------===//
+// Test module for operations & types of the Quantum dialect, commented ops are supposed to fail
+//===------------------------------------------------------------------------------------------===//
+
 module {
     // constants for later use
     %a = constant 1 : index
@@ -95,7 +98,7 @@ module {
     } -> !q.circ
 
 
-    // test register/list generation, commented trip the qubit/qureg/qlist invalidation verifiers
+    // test register generation, commented lines trip the qubit/qureg invalidation verifiers
     %10 = q.alloc -> !q.qubit
     %11 = q.alloc -> !q.qubit
     %12 = q.allocreg(4) -> !q.qureg<4>
@@ -105,35 +108,33 @@ module {
     //q.genreg %0, %2, %1 : !q.qubit, !q.qureg<4>, !q.qubit -> !q.qureg<8> // qubit num mismatch
     //q.genreg %1, %3 : !q.qubit, !q.qureg<4> -> !q.qureg<5>
     //q.genreg %10, %3 : !q.qubit, !q.qureg<4> -> !q.qureg<5>
-    func @invalid(%q : !q.qubit, %r : !q.qureg<4>, %l1 : !q.qlist, %l2 : !q.qlist) -> !q.qlist {
+    func @invalid(%q : !q.qubit, %r : !q.qureg<4>, %l1 : !q.qureg<>, %l2 : !q.qureg<>) -> !q.qureg<> {
         q.genreg %q, %r : !q.qubit, !q.qureg<4> -> !q.qureg<5>
         //q.X %q : !q.qubit
         //q.H %r : !q.qureg<4>
-        //q.genlist %l1, %l2 : !q.qlist, !q.qlist -> !q.qlist
-        return %l1 : !q.qlist
+        //q.genlist %l1, %l2 : !q.qureg, !q.qureg -> !q.qureg
+        return %l1 : !q.qureg<>
     }
 
 
     // test a parametrized circuit
-    func @fun(%dummy : index, %qbs : !q.qlist) {
-        q.H %qbs : !q.qlist
+    func @fun(%dummy : index, %qbs : !q.qureg<>) {
+        q.H %qbs : !q.qureg<>
         q.term
     }
-    func @fun2(%dummy : index, %qb : !q.qubit, %qbs : !q.qlist) {
+    func @fun2(%dummy : index, %qb : !q.qubit, %qbs : !q.qureg<>) {
         q.RZ(0.1) %qb : !q.qubit
-        q.H %qbs : !q.qlist
+        q.H %qbs : !q.qureg<>
         q.term
     }
-    func @fun3(%dummy : index, %qbs0 : !q.qlist, %qb : !q.qubit, %qbs1 : !q.qlist) {
+    func @fun3(%dummy : index, %qbs0 : !q.qureg<>, %qb : !q.qubit, %qbs1 : !q.qureg<>) {
         q.term
     }
 
-    %pc0 = "q.parcirc"(%0) {callee=@fun, n=1, operand_segment_sizes = dense<[1, 0]> : vector<2xi32>, static_ranges = []} : (!q.qubit) -> !q.circ
-    %pc1 = q.parcirc @fun(1, %0) : !q.qubit -> !q.circ
-    %pc2 = "q.parcirc"(%2) {callee=@fun, n=4, operand_segment_sizes = dense<[1, 0]> : vector<2xi32>, static_ranges = []} : (!q.qureg<4>) -> !q.circ
-    %pc3 = q.parcirc @fun(4, %2) : !q.qureg<4> -> !q.circ
-    %pc4 = "q.parcirc"(%0, %2) {callee=@fun2, n=5, operand_segment_sizes = dense<[2, 0]> : vector<2xi32>, static_ranges = []} : (!q.qubit, !q.qureg<4>) -> !q.circ
-    %pc5 = q.parcirc @fun2(5, %0, %2) : !q.qubit, !q.qureg<4> -> !q.circ
+    %pc0 = "q.parcirc"(%2) {callee=@fun, n=4, operand_segment_sizes = dense<[1, 0]> : vector<2xi32>, static_ranges = []} : (!q.qureg<4>) -> !q.circ
+    %pc1 = q.parcirc @fun(4, %2) : !q.qureg<4> -> !q.circ
+    %pc2 = "q.parcirc"(%0, %2) {callee=@fun2, n=5, operand_segment_sizes = dense<[2, 0]> : vector<2xi32>, static_ranges = []} : (!q.qubit, !q.qureg<4>) -> !q.circ
+    %pc3 = q.parcirc @fun2(5, %0, %2) : !q.qubit, !q.qureg<4> -> !q.circ
     //q.parcirc @fun3(4, %2) : !q.qureg<4> -> !q.circ               // function doesn't exist
     //q.parcirc @fun(4, %0, %2) : !q.qubit, !q.qureg<4> -> !q.circ  // too many arguments to func
     //q.parcirc @fun2(2, %2, %0) : !q.qureg<4>, !q.qubit -> !q.circ // arguments don't match sig

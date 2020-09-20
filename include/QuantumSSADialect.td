@@ -37,7 +37,6 @@ class QuantumSSA_Type<string cppTypeName, string description> :
 // Provide definitions of custom data types that support value semantics
 def Qstate_Type : QuantumSSA_Type<"QstateType", "Qubit state at a specific time">;
 def Rstate_Type : QuantumSSA_Type<"RstateType", "(Qubit) Register state at a specific time">;
-def Lstate_Type : QuantumSSA_Type<"LstateType", "(Qubit) List state at a specific time (no size)">;
 
 // Provide custom operation types representing a gate or circuit
 def Op_Type : QuantumSSA_Type<"OpType", "Quantum op type">;
@@ -46,7 +45,6 @@ def FunctionCircuit_Type : QuantumSSA_Type<"FunCircType", "Function circuit type
 
 // Provide aggregate types that might be used in ops accepting multiple types
 def QData_Type : AnyTypeOf<[Qstate_Type, Rstate_Type]>;
-def QDataX_Type : AnyTypeOf<[QData_Type, Lstate_Type]>;
 def QOp_Type : AnyTypeOf<[Op_Type, ControlledOp_Type, FunctionCircuit_Type]>;
 def QCirc_Type : AnyTypeOf<[FunctionCircuit_Type, ControlledOp_Type]>;
 def QDataOrOp_Type : AnyTypeOf<[QData_Type, Op_Type]>;

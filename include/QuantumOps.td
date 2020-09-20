@@ -117,80 +117,40 @@ def GenRegOp : Quantum_Op<"genreg", [NoSideEffect]> {
     );
 
     let verifier = [{
-        // obtain total number of qubits from input
+        // require atleast two arguments to be combined together
+        if (this->inputs().size() < 2)
+            return this->emitError() << "Provide >= 2 arguments to be combined into a register!";
+
+        // tally the number of qubits from input types if available
         unsigned totalqbs = 0;
+        bool lowerbound = false;
         for (auto argType : this->inputs().getTypes()) {
-            if (argType.isa<QubitType>())
+            if (argType.isa<QubitType>()) {
                 totalqbs++;
-            else if (argType.isa<QuregType>())
-                totalqbs += argType.cast<QuregType>().getNumQubits();
+            } else if (auto regType = argType.dyn_cast<QuregType>()) {
+                if (auto numQubits = regType.getNumQubits())
+                    totalqbs += *numQubits;
+                else
+                    lowerbound = true;
+            }
         }
 
-        // a register needs at least 2 qubits
-        if (totalqbs < 2)
-            return this->emitError() << "A register is composed of at least 2 qubits!";
-
-        // assert that this matches the output type
-        unsigned declsize = this->newreg().getType().cast<QuregType>().getNumQubits();
-        if (declsize != totalqbs)
-            return this->emitError() << "Number of qubits in output type doesn't match inputs!";
+        // perform as much static analysis as possible on the qubit number given the available type
+        // info: for inputs with no registers of undeclared size -> exact comparison
+        //       else -> qubit number from inputs provides lower bound on size of output register
+        if (auto declsize = this->newreg().getType().cast<QuregType>().getNumQubits()) {
+            if (!lowerbound && *declsize != totalqbs)
+                return this->emitError() << "Number of qubits in result type doesn't match the sum "
+                                            "of qubits in the input!";
+            else if (*declsize < totalqbs)
+                return this->emitError() << "Too few qubits in result type compared to the sum of "
+                                            "of qubits in the input!";
+        }
 
         // invalidate all arguments to this operation (no more uses beyond this point)
         for (auto arg : this->inputs()) {
             Value::user_range users = arg.getUsers();
             if (dyn_cast_or_null<GenRegOp>(*users.begin()) != *this) {
-                std::string errMsg("Operand value ");
-                arg.printAsOperand(llvm::raw_string_ostream(errMsg), AsmState(this->getParentOp()));
-                errMsg += " is invalid beyond this op, but detected further use!";
-                return this->emitError() << errMsg;
-            }
-        }
-
-        return success();
-    }];
-
-    let assemblyFormat = [{
-        operands attr-dict `:` type(operands) `->` type(results)
-    }];
-}
-
-def GenListOp : Quantum_Op<"genlist", [NoSideEffect]> {
-    let summary = "Generate a qubit list from multiple lists.";
-    let description = [{
-        This op allows to combine previously allocated qubit lists into
-        a new list for the purpose of passing it to other operations.
-        All arguments given to this op will become ivalid and must not
-        used again. This is checked by a pass.
-
-        Example:
-
-        ```mlir
-        func @foo(%a : !q.list, %b : !q.list) {
-            // Generate new list by combining others
-            %ab = "q.genlist"(%a, %b) : (!q.qlist, !q.qlist) -> !q.list
-            // OR in custom assembly format
-            %ab = q.genlist %a, %b : !q.list, !q.list -> !q.list
-        }
-        ```
-    }];
-
-    let arguments = (ins
-        Variadic<Qlist_Type> : $inputs
-    );
-
-    let results = (outs
-        Qlist_Type
-    );
-
-    let verifier = [{
-        // needs at least two arguments
-        if (this->inputs().size() < 2)
-            return this->emitError() << "Give at least two arguments!";
-
-        // invalidate all arguments to this operation (no more uses beyond this point)
-        for (auto arg : this->inputs()) {
-            Value::user_range users = arg.getUsers();
-            if (dyn_cast_or_null<GenListOp>(*users.begin()) != *this) {
                 std::string errMsg("Operand value ");
                 arg.printAsOperand(llvm::raw_string_ostream(errMsg), AsmState(this->getParentOp()));
                 errMsg += " is invalid beyond this op, but detected further use!";
@@ -237,7 +197,7 @@ def HOp : Quantum_Gate<"H", [Unitary, Hermitian, AttrSizedOperandSegments, RegAc
     }];
 
     let arguments = (ins
-        Optional<QDataX_Type> : $qbs,
+        Optional<QData_Type> : $qbs,
         Variadic<Index> : $range,
         I64ArrayAttr : $static_range
     );
@@ -300,7 +260,7 @@ def XOp : Quantum_Gate<"X", [Unitary, Hermitian, AttrSizedOperandSegments, RegAc
     }];
 
     let arguments = (ins
-        Optional<QDataX_Type> : $qbs,
+        Optional<QData_Type> : $qbs,
         Variadic<Index> : $range,
         I64ArrayAttr : $static_range
     );
@@ -364,7 +324,7 @@ def RzOp : Quantum_Gate<"RZ", [Unitary, AttrSizedOperandSegments, RegAccessInter
     }];
 
     let arguments = (ins
-        Optional<QDataX_Type> : $qbs,
+        Optional<QData_Type> : $qbs,
         Variadic<Index> : $range,
         I64ArrayAttr : $static_range,
         APFloatAttr : $phi
@@ -434,9 +394,9 @@ def CNotOp : Quantum_Gate<"CX", [Unitary, Hermitian, AttrSizedOperandSegments, R
     }];
 
     let arguments = (ins
-        QDataX_Type : $ctrl,            // only one qubit allowed, but with RegAccess need QDataX
+        QData_Type : $ctrl,            // only one qubit allowed, but with RegAccess need QData
         Optional<Index> : $crange,
-        Optional<QDataX_Type> : $qbs,
+        Optional<QData_Type> : $qbs,
         Variadic<Index> : $qrange,
         I64ArrayAttr : $static_crange,
         I64ArrayAttr : $static_qrange
@@ -449,10 +409,10 @@ def CNotOp : Quantum_Gate<"CX", [Unitary, Hermitian, AttrSizedOperandSegments, R
     let additionalVerifier = [{
         //if (this->qbs() && this->qbs() == this->ctrl())
         //    return this->emitError() << "Cannot use same qubit for control AND target!";
-        if ((this->ctrl().getType().isa<QuregType>() || this->ctrl().getType().isa<QlistType>()) &&
-            (!this->crange() && this->static_crange().size() != 1))
+        if (this->ctrl().getType().isa<QuregType>() &&
+                !this->crange() && this->static_crange().size() != 1)
             return this->emitError() << "The control operand can only be a singular qubit, thus if "
-                                        "type is Qureg/Qlist, must provide 1 reg accessor index!";
+                                        "type is Qureg, must provide 1 reg accessor index!";
     }];
 
     let extraClassDeclaration = [{
@@ -585,24 +545,29 @@ def ParametricCircuitOp : Quantum_Op<"parcirc", [AttrSizedOperandSegments, RegAc
     );
 
     let verifier = [{
-        // obtain total number of qubits from qbs
+        // tally the number of qubits from input types if available
         unsigned totalqbs = 0;
-
-        auto qbstypes = this->qbs().getTypes();
-        for (auto type : qbstypes) {
-            if (type.isa<QubitType>())
+        bool lowerbound = false;
+        for (auto argType : this->qbs().getTypes()) {
+            if (argType.isa<QubitType>()) {
                 totalqbs++;
-            else if (type.isa<QuregType>())
-                totalqbs += type.cast<QuregType>().getNumQubits();
+            } else if (auto regType = argType.dyn_cast<QuregType>()) {
+                if (auto numQubits = regType.getNumQubits())
+                    totalqbs += *numQubits;
+                else
+                    lowerbound = true;
+            }
         }
 
-        if (this->n().ugt(totalqbs))
-            this->emitError() << "Supplied insufficient qubits for size parameter n!";
+        // if no registers of undeclared size were provided, make sure sufficient qubits are
+        // available for the circuit size parameter n
+        if (!lowerbound && this->n().ugt(totalqbs))
+            return this->emitError() << "Supplied insufficient qubits for size parameter n!";
 
         // make sure the function exists
         auto funptr = this->resolveCallable();
         if (!funptr)
-            this->emitError() << "The given function could not be resolved!";
+            return this->emitError() << "The given function could not be resolved!";
 
         // make sure function arguments match
         auto typeattr = funptr->getAttrDictionary().get("type").dyn_cast<TypeAttr>();
@@ -610,34 +575,44 @@ def ParametricCircuitOp : Quantum_Op<"parcirc", [AttrSizedOperandSegments, RegAc
 
         // compare number of arguments while ignoring parameter in function signature
         if (funtype.getNumInputs()-1 != this->qbs().size())
-            this->emitError() << "Given number of function arguments does not match!"
-                                 " Required: " << funtype.getNumInputs()-1 <<
-                                 ". Got: " << this->getNumOperands() << ".";
+            return this->emitError() << "Given number of function arguments does not match! "
+                                        "Required: " << funtype.getNumInputs()-1 << ". "
+                                        "Got: " << this->getNumOperands() << ".";
 
         // compare each parameter type:
-        //  - a !q.qlist must match either !q.qubit or !q.qureg
+        //  - a !q.qureg must be matched with another !q.qureg, but only if both types have size
+        //    information will the given register be checked to be at least as large as required
         //  - for all other types, they must match exactly
         unsigned i = 0;
-        auto opargtypes = qbstypes.begin();
-        for (auto arg : funtype.getInputs()) {
+        auto opargtypes = this->qbs().getTypes().begin();
+        for (auto argtype : funtype.getInputs()) {
             if (i++ == 0) {
                 // make sure the circuit size parameter is declared in the function
-                if (!arg.isa<IndexType>())
-                    this->emitError() << "First function argument must be index (circuit size)!";
+                if (!argtype.isa<IndexType>())
+                    return this->emitError() << "First function argument must be the circuit size "
+                                                "of type 'index'!";
                 // for the rest, skip circuit parameter (first in arg list)
                 continue;
             }
 
             auto giventype = *opargtypes++;
-            if (arg.isa<QlistType>()) {
-                if (!giventype.isa<QuregType>() && !giventype.isa<QubitType>())
-                    this->emitError() << "Function expects '!q.qlist' argument, which must be "
-                                         "instantiated with either a '!q.qubit' or '!q.qureg'. "
-                                         "Got: " << giventype << "!";
+            if (auto atype = argtype.dyn_cast<QuregType>()) {
+                if (auto gtype = giventype.dyn_cast<QuregType>()) {
+                    if (gtype.getNumQubits() && atype.getNumQubits()) {
+                        if (*gtype.getNumQubits() < *atype.getNumQubits())
+                            return this->emitError() << "Provided register argument at position "
+                                                        << i-2 << " has fewer qubits than expected "
+                                                        "by the function signature!";
+                    }
+                } else {
+                    return this->emitError() << "Function expects '!q.qureg' argument, but got "
+                                                "'" << giventype << "'!";
+                }
             } else {
-                if (arg != giventype)
-                    this->emitError() << "Type " << giventype << " at index " << i-2 <<
-                                         " did not match function signature type " << arg << "!";
+                if (argtype != giventype)
+                    return this->emitError() << "Argument at position " << i-2 << " of type "
+                                                "'" << giventype << "' did not match expected "
+                                                "type '" << argtype << "'!";
             }
         }
 
@@ -756,9 +731,9 @@ def ControlOp : Quantum_Gate<"c", [Meta, AttrSizedOperandSegments, RegAccessInte
 
     let arguments = (ins
         QOp_Type : $heldOp,
-        QDataX_Type: $ctrls,
+        QData_Type: $ctrls,
         Variadic<Index> : $crange,
-        Optional<QDataX_Type> : $qbs,
+        Optional<QData_Type> : $qbs,
         Variadic<Index> : $qrange,
         I64ArrayAttr : $static_crange,
         I64ArrayAttr : $static_qrange
@@ -786,12 +761,16 @@ def ControlOp : Quantum_Gate<"c", [Meta, AttrSizedOperandSegments, RegAccessInte
             totalctrls += heldOp.cast<COpType>().getNumCtrls();
 
         auto ctrls = this->ctrls().getType();
-        if (ctrls.isa<QubitType>())
+        if (ctrls.isa<QubitType>()) {
             totalctrls++;
-        else if (ctrls.isa<QuregType>())
-            totalctrls += ctrls.cast<QuregType>().getNumQubits();
-        else
-            totalctrls = -1; // disable # of ctrl qubits check when using qlist
+        } else if (auto regType = ctrls.dyn_cast<QuregType>()) {
+            if (auto numQubits = regType.getNumQubits())
+                totalctrls += *numQubits;
+            else
+                totalctrls = -1; // disable # of ctrl qubits check when no size is provided
+        } else {
+            assert(false && "Unknown data-type encountered in ControlOp!");
+        }
 
         // disable # of ctrl qubits check when using register accessors
         if (this->static_crange().size())
@@ -884,7 +863,7 @@ def AdjointOp : Quantum_Gate<"adj", [Meta, AttrSizedOperandSegments, RegAccessIn
 
     let arguments = (ins
         QOp_Type : $heldOp,
-        Optional<QDataX_Type> : $qbs,
+        Optional<QData_Type> : $qbs,
         Variadic<Index> : $range,
         I64ArrayAttr : $static_range
     );

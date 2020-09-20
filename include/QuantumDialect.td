@@ -45,7 +45,6 @@ class Quantum_Type<string cppTypeName, string description> :
 // Provide definitions for custom data types that support memory semantics
 def Qubit_Type : Quantum_Type<"QubitType", "Quantum qubit type">;
 def Qureg_Type : Quantum_Type<"QuregType", "Quantum register type">;
-def Qlist_Type : Quantum_Type<"QlistType", "Quantum register of undeclared size type">;
 
 // Provide custom operation types representing a gate or circuit
 def Op_Type : Quantum_Type<"OpType", "Quantum op type">;
@@ -54,7 +53,6 @@ def Circuit_Type : Quantum_Type<"CircType", "Quantum circuit type">;
 
 // Provide aggregate types that might be used in ops accepting multiple types
 def QData_Type : AnyTypeOf<[Qubit_Type, Qureg_Type]>;
-def QDataX_Type : AnyTypeOf<[QData_Type, Qlist_Type]>;
 def QOp_Type : AnyTypeOf<[Op_Type, ControlledOp_Type, Circuit_Type]>;
 def QCirc_Type : AnyTypeOf<[Circuit_Type, ControlledOp_Type]>;
 

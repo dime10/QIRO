@@ -20,9 +20,7 @@ using namespace mlir::quantumssa;
 //===------------------------------------------------------------------------------------------===//
 
 bool isQData(Type ty) {
-    return ty.isa<quantum::QubitType>() ||
-           ty.isa<quantum::QuregType>() ||
-           ty.isa<quantum::QlistType>();
+    return ty.isa<quantum::QubitType>() || ty.isa<quantum::QuregType>();
 }
 
 
@@ -91,8 +89,7 @@ private:
         Type outType;
         if (inType.isa<quantum::OpType>()) {
             outType = builder.getType<OpType>();
-        } else if (inType.isa<quantum::COpType>()) {
-            quantum::COpType copType = inType.cast<quantum::COpType>();
+        } else if (auto copType = inType.dyn_cast<quantum::COpType>()) {
             unsigned n = copType.getNumCtrls();
             Type baseType = copType.getBaseType();
             baseType = baseType ? convDialectType(baseType, builder, operand) : baseType;
@@ -102,10 +99,10 @@ private:
             outType = operand.getType();
         } else if (inType.isa<quantum::QubitType>()) {
             outType = builder.getType<QstateType>();
-        } else if (inType.isa<quantum::QuregType>()) {
-            outType = builder.getType<RstateType>(inType.cast<quantum::QuregType>().getNumQubits());
-        } else if (inType.isa<quantum::QlistType>()) {
-            outType = builder.getType<LstateType>();
+        } else if (auto regType = inType.dyn_cast<quantum::QuregType>()) {
+            outType = builder.getType<RstateType>(regType.getNumQubits());
+        } else {
+            assert(false && "Unrecognized dialect type encountered during conversion!");
         }
         return outType;
     }
