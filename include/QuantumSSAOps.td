@@ -19,11 +19,11 @@ class QuantumSSA_Gate<string mnemonic, list<OpTrait> traits = []> : QuantumSSA_O
     let verifier = additionalVerifier#[{
         if (this->qbs()) {
             if(this->qbs().getType() != this->res().getType())
-                return this->emitError() << "When providing target, return type must be identical!";
+                return this->emitOpError() << "requires same type for input and return state!";
         } else if (!this->res().getType().isa<OpType>() &&
                    !this->res().getType().isa<COpType>() &&
                    !this->res().getType().isa<FunCircType>()) {
-            return this->emitError() << "If no target is given, must return the op!";
+            return this->emitOpError() << "must return itself when no target given!";
         }
 
         return success();
@@ -270,7 +270,7 @@ def CNotOp : QuantumSSA_Gate<"CX", [Unitary, Hermitian]> {
     let additionalVerifier = [{
         // check that target and control are not the same
         if (this->qbs() && this->qbs() == this->ctrl()) {
-            return this->emitError() << "Cannot use same value for control AND target!";
+            return this->emitOpError() << "can't use the same value as control AND target!";
         }
     }];
 
@@ -334,13 +334,13 @@ def FunCircOp : QuantumSSA_Op<"funcirc"> {
         // make sure the function exists
         auto funptr = this->resolveCallable();
         if (!funptr)
-            this->emitError() << "The given function could not be resolved!";
+            return this->emitOpError() << "cannot resolve given function!";
 
         // make sure function arguments match
         auto retType = this->funcirc().getType().dyn_cast<FunCircType>();
         auto funtype = funptr->getAttrOfType<TypeAttr>("type").getValue().dyn_cast<FunctionType>();
         if (funtype != retType.getFunType())
-            this->emitError() << "Return type does not match function type!";
+            this->emitOpError() << "must return 'fcirc' type that matches given function type!";
 
         return success();
     }];
@@ -384,7 +384,7 @@ def ApplyFunCircOp : QuantumSSA_Op<"applyfc"> {
         if (auto copType = circType.dyn_cast<COpType>()) {
             circType = copType.getBaseType();
             if (!circType || !circType.isa<FunCircType>())
-                return this->emitError() << "This op can only be applied to (fun.) circuit types!";
+                return this->emitOpError() << "only accepts controlled ops with base type 'fcirc'!";
         }
 
         auto funargTypes = circType.cast<FunCircType>().getFunType().getInputs();
@@ -465,14 +465,14 @@ def ControlOp : QuantumSSA_Gate<"c", [Meta]> {
     let additionalVerifier = [{
         // make sure target and control aren't identical (basic test, not comprehensive)
         if (this->qbs() && this->qbs() == this->ctrls())
-            return this->emitError() << "Cannot use same value for control AND target!";
+            return this->emitOpError() << "can't use the same value as control AND target!";
 
         auto heldOp = this->heldOp().getType();
         // make sure user is not trying to apply a circuit op by specifying a target
         if (this->qbs() && (heldOp.isa<FunCircType>() || heldOp.isa<COpType>() &&
                             heldOp.cast<COpType>().getBaseType() &&
                             heldOp.cast<COpType>().getBaseType().isa<FunCircType>()))
-            return this->emitError() << "Circuit cannot be applied by specifying qubits!";
+            return this->emitOpError() << "does not accept target qubits when controlling circuit!";
 
         // obtain total number of control qubits from input
         unsigned totalctrls = 0;
@@ -497,15 +497,16 @@ def ControlOp : QuantumSSA_Gate<"c", [Meta]> {
             COpType output = this->res().getType().cast<COpType>();
             // assert correct number of control qubits
             if (totalctrls != -1 && output.getNumCtrls() != totalctrls)
-                return this->emitError() << "Number of output controls doesn't match inputs!";
+                return this->emitOpError() << "with mismatched number of controls in return type "
+                                              "vs inputs!";
 
             // assert proper base type
             if (heldOp.isa<COpType>()) {
                 if (heldOp.cast<COpType>().getBaseType() != output.getBaseType())
-                    return this->emitError() << "ControlOp must preserve base type when given COp!";
+                    return this->emitOpError() << "must preserve base type when given 'COp'!";
             } else {
                 if (heldOp != output.getBaseType())
-                    return this->emitError() << "Returned base type doesn't match given operation!";
+                    return this->emitOpError() << "return base type must match given operation!";
             }
         }
     }];
@@ -556,12 +557,12 @@ def AdjointOp : QuantumSSA_Gate<"adj", [Meta]> {
     string additionalVerifier = [{
         auto heldOp = this->heldOp().getType();
         if (!this->qbs() && heldOp != this->res().getType())
-            return this->emitError() << "Input op type must match output op type!";
+            return this->emitOpError() << "given operation type must match output type!";
 
         // make sure user is not trying to apply a circuit op by specifying a target
         if (this->qbs() && (heldOp.isa<FunCircType>() || heldOp.isa<COpType>() &&
                             heldOp.cast<COpType>().getBaseType().isa<FunCircType>()))
-            return this->emitError() << "Circuit cannot be applied by specifying qubits!";
+            return this->emitOpError() << "does not accept target qubits when inverting circuit!";
     }];
 
     let assemblyFormat = [{

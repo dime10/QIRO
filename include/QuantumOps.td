@@ -21,9 +21,9 @@ class Quantum_Gate<string mnemonic, list<OpTrait> traits = []> : Quantum_Op<mnem
     string additionalVerifier = "";
     let verifier = additionalVerifier#[{
         if (!this->qbs() && !this->op())
-            return this->emitError() << "Need to either specify target qubits or return type!";
+            return this->emitOpError() << "needs either target qubits or return type!";
         if (this->qbs() && this->op())
-            return this->emitError() << "Cannot specify both target qubits and return type!";
+            return this->emitOpError() << "cannot have both target qubits and return type!";
 
         return success();
     }];
@@ -119,7 +119,7 @@ def GenRegOp : Quantum_Op<"genreg", [NoSideEffect]> {
     let verifier = [{
         // require atleast two arguments to be combined together
         if (this->inputs().size() < 2)
-            return this->emitError() << "Provide >= 2 arguments to be combined into a register!";
+            return this->emitOpError() << "requires >= 2 arguments to be combined into a register!";
 
         // tally the number of qubits from input types if available
         unsigned totalqbs = 0;
@@ -140,11 +140,11 @@ def GenRegOp : Quantum_Op<"genreg", [NoSideEffect]> {
         //       else -> qubit number from inputs provides lower bound on size of output register
         if (auto declsize = this->newreg().getType().cast<QuregType>().getNumQubits()) {
             if (!lowerbound && *declsize != totalqbs)
-                return this->emitError() << "Number of qubits in result type doesn't match the sum "
-                                            "of qubits in the input!";
+                return this->emitOpError() << "with mismatched number of qubits in result type vs "
+                                              "sum of qubits in the input!";
             else if (*declsize < totalqbs)
-                return this->emitError() << "Too few qubits in result type compared to the sum of "
-                                            "of qubits in the input!";
+                return this->emitOpError() << "with too few qubits in result type vs sum of qubits "
+                                              "in the input!";
         }
 
         // invalidate all arguments to this operation (no more uses beyond this point)
@@ -153,7 +153,7 @@ def GenRegOp : Quantum_Op<"genreg", [NoSideEffect]> {
             if (dyn_cast_or_null<GenRegOp>(*users.begin()) != *this) {
                 std::string errMsg("Operand value ");
                 arg.printAsOperand(llvm::raw_string_ostream(errMsg), AsmState(this->getParentOp()));
-                errMsg += " is invalid beyond this op, but detected further use!";
+                errMsg += " is invalid beyond current op, but detected further use!";
                 return this->emitError() << errMsg;
             }
         }
@@ -407,12 +407,10 @@ def CNotOp : Quantum_Gate<"CX", [Unitary, Hermitian, AttrSizedOperandSegments, R
     );
 
     let additionalVerifier = [{
-        //if (this->qbs() && this->qbs() == this->ctrl())
-        //    return this->emitError() << "Cannot use same qubit for control AND target!";
         if (this->ctrl().getType().isa<QuregType>() &&
                 !this->crange() && this->static_crange().size() != 1)
-            return this->emitError() << "The control operand can only be a singular qubit, thus if "
-                                        "type is Qureg, must provide 1 reg accessor index!";
+            return this->emitOpError() << "only accepts single qubit for the 'ctrl' operand, thus "
+                                          "if value is a register, must exactly 1 accessor index!";
     }];
 
     let extraClassDeclaration = [{
@@ -562,12 +560,12 @@ def ParametricCircuitOp : Quantum_Op<"parcirc", [AttrSizedOperandSegments, RegAc
         // if no registers of undeclared size were provided, make sure sufficient qubits are
         // available for the circuit size parameter n
         if (!lowerbound && this->n().ugt(totalqbs))
-            return this->emitError() << "Supplied insufficient qubits for size parameter n!";
+            return this->emitOpError() << "has insufficient total qubits for size parameter n!";
 
         // make sure the function exists
         auto funptr = this->resolveCallable();
         if (!funptr)
-            return this->emitError() << "The given function could not be resolved!";
+            return this->emitOpError() << "cannot resolve given function!";
 
         // make sure function arguments match
         auto typeattr = funptr->getAttrDictionary().get("type").dyn_cast<TypeAttr>();
@@ -575,9 +573,9 @@ def ParametricCircuitOp : Quantum_Op<"parcirc", [AttrSizedOperandSegments, RegAc
 
         // compare number of arguments while ignoring parameter in function signature
         if (funtype.getNumInputs()-1 != this->qbs().size())
-            return this->emitError() << "Given number of function arguments does not match! "
-                                        "Required: " << funtype.getNumInputs()-1 << ". "
-                                        "Got: " << this->getNumOperands() << ".";
+            return this->emitOpError() << "has wrong number of function arguments! "
+                                          "Signature requires: " << funtype.getNumInputs()-1 << ". "
+                                          "Got: " << this->getNumOperands() << ".";
 
         // compare each parameter type:
         //  - a !q.qureg must be matched with another !q.qureg, but only if both types have size
@@ -589,8 +587,8 @@ def ParametricCircuitOp : Quantum_Op<"parcirc", [AttrSizedOperandSegments, RegAc
             if (i++ == 0) {
                 // make sure the circuit size parameter is declared in the function
                 if (!argtype.isa<IndexType>())
-                    return this->emitError() << "First function argument must be the circuit size "
-                                                "of type 'index'!";
+                    return this->emitOpError() << "needs first function argument to be the circuit "
+                                                  "size with type 'index'!";
                 // for the rest, skip circuit parameter (first in arg list)
                 continue;
             }
@@ -600,19 +598,21 @@ def ParametricCircuitOp : Quantum_Op<"parcirc", [AttrSizedOperandSegments, RegAc
                 if (auto gtype = giventype.dyn_cast<QuregType>()) {
                     if (gtype.getNumQubits() && atype.getNumQubits()) {
                         if (*gtype.getNumQubits() < *atype.getNumQubits())
-                            return this->emitError() << "Provided register argument at position "
-                                                        << i-2 << " has fewer qubits than expected "
-                                                        "by the function signature!";
+                            return this->emitOpError()
+                                << "with insufficient qubits in register argument at position "
+                                << i-2 << ", as signature expects: " << *atype.getNumQubits()
+                                << ", but got: " << *gtype.getNumQubits() << "!";
                     }
                 } else {
-                    return this->emitError() << "Function expects '!q.qureg' argument, but got "
-                                                "'" << giventype << "'!";
+                    return this->emitOpError() << "detected wrong argument type at position "
+                                               << i-2 << ", expected: " << argtype << ", "
+                                               << "but got: " << giventype << "!";
                 }
             } else {
                 if (argtype != giventype)
-                    return this->emitError() << "Argument at position " << i-2 << " of type "
-                                                "'" << giventype << "' did not match expected "
-                                                "type '" << argtype << "'!";
+                    return this->emitOpError() << "detected wrong argument type at position "
+                                               << i-2 << ", expected: " << argtype << ", "
+                                               << "but got: " << giventype << "!";
             }
         }
 
@@ -687,7 +687,7 @@ def ApplyCircOp : Quantum_Op<"apply"> {
         if (this->circ().getType().isa<COpType>() &&
             (!this->circ().getType().cast<COpType>().getBaseType() ||
              !this->circ().getType().cast<COpType>().getBaseType().isa<CircType>()))
-            return this->emitError() << "This op can only be applied to circuit(-derived) types!";
+            return this->emitOpError() << "can only be applied to circuit(-derived) types!";
 
         return success();
     }];
@@ -745,14 +745,10 @@ def ControlOp : Quantum_Gate<"c", [Meta, AttrSizedOperandSegments, RegAccessInte
     );
 
     let additionalVerifier = [{
-        // make sure target and control aren't identical (basic test, not comprehensive)
-        //if (this->qbs() && this->qbs() == this->ctrls())
-        //    return this->emitError() << "Cannot use same qubits for control AND target!";
-
         auto heldOp = this->heldOp().getType();
         // make sure user is not trying to apply a circuit op by specifying a target
         if (heldOp.isa<CircType>() && this->qbs())
-            return this->emitError() << "Circuit cannot be applied by specifying qubits!";
+            return this->emitOpError() << "does not accept target qubits when controlling circuit!";
 
         // obtain total number of control qubits from input
         unsigned totalctrls = 0;
@@ -789,15 +785,16 @@ def ControlOp : Quantum_Gate<"c", [Meta, AttrSizedOperandSegments, RegAccessInte
             COpType output = this->op().getType().cast<COpType>();
             // assert correct number of control qubits
             if (totalctrls != -1 && output.getNumCtrls() != totalctrls)
-                return this->emitError() << "Number of output controls doesn't match inputs!";
+                return this->emitOpError() << "with mismatched number of controls in return type "
+                                              "vs inputs!";
 
             // assert proper base type
             if (heldOp.isa<COpType>()) {
                 if (heldOp.cast<COpType>().getBaseType() != output.getBaseType())
-                    return this->emitError() << "ControlOp must preserve base type when given COp!";
+                    return this->emitOpError() << "must preserve base type when given 'COp'!";
             } else {
                 if (heldOp != output.getBaseType())
-                    return this->emitError() << "Returned base type doesn't match given operation!";
+                    return this->emitOpError() << "return base type must match given operation!";
             }
         }
     }];
@@ -874,10 +871,10 @@ def AdjointOp : Quantum_Gate<"adj", [Meta, AttrSizedOperandSegments, RegAccessIn
 
     let additionalVerifier = [{
         if (this->op() && this->heldOp().getType() != this->op().getType())
-            return this->emitError() << "Input op type must match output op type!";
+            return this->emitOpError() << "given operation type must match output type!";
 
         if (this->heldOp().getType().isa<CircType>() && this->qbs())
-            return this->emitError() << "Circuit cannot be applied by specifying qubits!";
+            return this->emitOpError() << "does not accept target qubits when inverting circuit!";
     }];
 
     let extraClassDeclaration = [{
