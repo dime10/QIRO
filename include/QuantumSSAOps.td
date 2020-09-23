@@ -128,8 +128,9 @@ def HOp : QuantumSSA_Gate<"H", [Unitary, Hermitian]> {
         QDataOrOp_Type : $res
     );
 
-    let printer = "return ::print(p, *this);";
-    let parser = "return ::prettyParseOp(parser, result);";
+    let assemblyFormat = [{
+        ($qbs^ `:` type($qbs))? `->` type(results) attr-dict
+    }];
 }
 
 def XOp : QuantumSSA_Gate<"X", [Unitary, Hermitian]> {
@@ -171,8 +172,9 @@ def XOp : QuantumSSA_Gate<"X", [Unitary, Hermitian]> {
         QDataOrOp_Type : $res
     );
 
-    let printer = "return ::print(p, *this);";
-    let parser = "return ::prettyParseOp(parser, result);";
+    let assemblyFormat = [{
+        ($qbs^ `:` type($qbs))? `->` type(results) attr-dict
+    }];
 }
 
 def RzOp : QuantumSSA_Gate<"RZ", [Unitary]> {
@@ -215,8 +217,9 @@ def RzOp : QuantumSSA_Gate<"RZ", [Unitary]> {
         QDataOrOp_Type : $res
     );
 
-    let printer = "return ::print(p, *this);";
-    let parser = "return ::prettyParseOp(parser, result, true);";
+    let assemblyFormat = [{
+        `(` $phi `)` ($qbs^ `:` type($qbs))? `->` type(results) attr-dict
+    }];
 }
 
 def CNotOp : QuantumSSA_Gate<"CX", [Unitary, Hermitian]> {
@@ -271,8 +274,9 @@ def CNotOp : QuantumSSA_Gate<"CX", [Unitary, Hermitian]> {
         }
     }];
 
-    let printer = "return ::print(p, *this);";
-    let parser = "return ::prettyParseOp(parser, result);";
+    let assemblyFormat = [{
+        operands `:` type(operands) `->` type(results) attr-dict
+    }];
 }
 
 def ReturnStateOp : QuantumSSA_Op<"return", [Terminator]> {
@@ -506,8 +510,9 @@ def ControlOp : QuantumSSA_Gate<"c", [Meta]> {
         }
     }];
 
-    let printer = "return ::print(p, *this);";
-    let parser = "return ::prettyParseOp(parser, result);";
+    let assemblyFormat = [{
+        operands `:` type(operands) `->` type(results) attr-dict
+    }];
 }
 
 def AdjointOp : QuantumSSA_Gate<"adj", [Meta]> {
@@ -559,8 +564,9 @@ def AdjointOp : QuantumSSA_Gate<"adj", [Meta]> {
             return this->emitError() << "Circuit cannot be applied by specifying qubits!";
     }];
 
-    let printer = "return ::print(p, *this);";
-    let parser = "return ::prettyParseOp(parser, result);";
+    let assemblyFormat = [{
+        operands `:` type(operands) `->` type(results) attr-dict
+    }];
 }
 
 #endif // QUANTUM_SSA_OPS

@@ -4,6 +4,7 @@
 #include "mlir/IR/DialectImplementation.h"
 #include "mlir/IR/AsmState.h"
 #include "llvm/ADT/TypeSwitch.h"
+#include "llvm/ADT/StringSwitch.h"
 
 #include "QuantumDialect.h"
 
@@ -11,6 +12,8 @@
 
 using namespace mlir;
 using namespace mlir::quantum;
+
+#define EMIT_ERROR(p, m) p.emitError(p.getCurrentLocation(), m)
 
 
 //===------------------------------------------------------------------------------------------===//
@@ -31,7 +34,7 @@ namespace mlir {
 namespace quantum {
 namespace detail {
 // This class represents the internal storage of the Quantum 'QuregType'.
-struct QuregTypeStorage : public mlir::TypeStorage {
+struct QuregTypeStorage : public TypeStorage {
     // The `KeyTy` is a required type that provides an interface for the storage instance.
     // This type will be used when uniquing an instance of the type storage. For our Qureg
     // type, we will unique each instance on its size.
@@ -57,7 +60,7 @@ struct QuregTypeStorage : public mlir::TypeStorage {
     // This method takes an instance of a storage allocator, and an instance of a `KeyTy`.
     // The given allocator must be used for *all* necessary dynamic allocations used to
     // create the type storage and its internal.
-    static QuregTypeStorage *construct(mlir::TypeStorageAllocator &allocator, const KeyTy &key) {
+    static QuregTypeStorage *construct(TypeStorageAllocator &allocator, const KeyTy &key) {
         // Allocate the storage instance and construct it.
         llvm::Optional<int> size = key < 0 ? llvm::None : llvm::Optional<int>(key);
         return new (allocator.allocate<QuregTypeStorage>()) QuregTypeStorage(size);
@@ -65,7 +68,7 @@ struct QuregTypeStorage : public mlir::TypeStorage {
 };
 
 // This class represents the internal storage of the Quantum 'COpType'.
-struct COpTypeStorage : public mlir::TypeStorage {
+struct COpTypeStorage : public TypeStorage {
     using KeyTy = std::pair<unsigned, Type>;
 
     unsigned nctrl;
@@ -82,7 +85,7 @@ struct COpTypeStorage : public mlir::TypeStorage {
 
     bool operator==(const KeyTy &key) const { return key.first == nctrl && key.second == baseType; }
 
-    static COpTypeStorage *construct(mlir::TypeStorageAllocator &allocator, const KeyTy &key) {
+    static COpTypeStorage *construct(TypeStorageAllocator &allocator, const KeyTy &key) {
         return new (allocator.allocate<COpTypeStorage>()) COpTypeStorage(key.first, key.second);
     }
 };
@@ -96,7 +99,7 @@ struct COpTypeStorage : public mlir::TypeStorage {
 //===------------------------------------------------------------------------------------------===//
 
 // Qureg
-QuregType QuregType::get(mlir::MLIRContext *ctx, llvm::Optional<int> size) {
+QuregType QuregType::get(MLIRContext *ctx, llvm::Optional<int> size) {
     // Parameters to the storage class are passed after the custom type kind.
     detail::QuregTypeStorage::KeyTy key = size ? *size : -1;
     return Base::get(ctx, key);
@@ -108,7 +111,7 @@ llvm::Optional<int> QuregType::getNumQubits() {
 }
 
 // COp
-COpType COpType::get(mlir::MLIRContext *ctx, unsigned nctrl, mlir::Type baseType) {
+COpType COpType::get(MLIRContext *ctx, unsigned nctrl, Type baseType) {
     // Parameters to the storage class are passed after the custom type kind.
     return Base::get(ctx, nctrl, baseType);
 }
@@ -129,73 +132,87 @@ Type COpType::getBaseType() {
 //===------------------------------------------------------------------------------------------===//
 
 // Print an instance of a type registered in the Quantum dialect.
-void QuantumDialect::printType(mlir::Type type, mlir::DialectAsmPrinter &printer) const {
+void QuantumDialect::printType(Type type, DialectAsmPrinter &printer) const {
     // Differentiate between the Quantum types and print accordingly.
-    llvm::TypeSwitch<mlir::Type>(type)
+    llvm::TypeSwitch<Type>(type)
         .Case<QubitType>([&](QubitType)   { printer << "qubit"; })
         .Case<QuregType>([&](QuregType t) { printer << "qureg<";
                                             if (auto numQubits = t.getNumQubits())
-                                                 printer << *numQubits;
+                                                printer << *numQubits;
                                             printer << ">"; })
-        .Case<OpType>([&](OpType)         { printer << "op"; })
-        .Case<COpType>([&](COpType t)     { printer << "cop<" << t.getNumCtrls();
+        .Case<OpType>   ([&](OpType)      { printer << "op"; })
+        .Case<COpType>  ([&](COpType t)   { printer << "cop<" << t.getNumCtrls();
                                             if (auto baseType = t.getBaseType())
                                                 printer << ", " << baseType;
                                             printer << ">"; })
-        .Case<CircType>([&](CircType)     { printer << "circ"; })
+        .Case<CircType> ([&](CircType)    { printer << "circ"; })
         .Default([](Type) { llvm_unreachable("unrecognized type encountered in the printer!"); });
 }
 
 // Parse an instance of a type registered to the Quantum dialect.
-mlir::Type QuantumDialect::parseType(mlir::DialectAsmParser &parser) const {
+Type QuantumDialect::parseType(DialectAsmParser &parser) const {
     // NOTE: All MLIR parser function return a ParseResult. This is a
     // specialization of LogicalResult that auto-converts to a `true` boolean
     // value on failure to allow for chaining, but may be used with explicit
     // `mlir::failed/mlir::succeeded` as desired.
+    Builder &builder = parser.getBuilder();
 
-    // Try to parse either the Qubit or Qureg type. On failure, exit this function.
+    // Attempt to parse all supported dialect types.
     StringRef keyword;
     if (parser.parseKeyword(&keyword))
-        return Type();
+        return EMIT_ERROR(parser, "error parsing type keyword!"), nullptr;
 
-    if (keyword == "qubit")
-        return QubitType::get(this->getContext());
-    if (keyword == "qureg") {
-        int size;
-        if (parser.parseLess())
-            return nullptr;
-        auto res = parser.parseOptionalInteger<int>(size);
-        if (res.hasValue() && failed(res.getValue()))
-            return nullptr;
-        if (parser.parseGreater())
-            return nullptr;
-        llvm::Optional<int> optionalSize = res.hasValue() ? llvm::Optional<int>(size) : llvm::None;
-        return QuregType::get(this->getContext(), optionalSize);;
-    }
-    if (keyword == "op")
-        return OpType::get(this->getContext());
-    if (keyword == "cop") {
-        unsigned nctrl;
-        Type baseType = nullptr;
-        if (parser.parseLess())
-            return nullptr;
-        if (parser.parseInteger<unsigned>(nctrl))
-            return nullptr;
-        if (succeeded(parser.parseOptionalComma()))
-            if (parser.parseType(baseType))
-                return nullptr;
-        if (parser.parseGreater())
-            return nullptr;
-        if (baseType && !(baseType.isa<OpType>() || baseType.isa<CircType>()))
-            parser.emitError(parser.getCurrentLocation(),
-                            "Base type of controlled op can only be supported quantum operations!");
-        return COpType::get(this->getContext(), nctrl, baseType);
-    }
-    if (keyword == "circ")
-        return CircType::get(this->getContext());
+    // Lambdas are needed so as not to call the helper functions due to eager parameter evaluation
+    Type result = llvm::StringSwitch<function_ref<Type()>>(keyword)
+        .Case("qubit", [&] { return builder.getType<QubitType>(); })
+        .Case("qureg", [&] { return parseQuregType(parser); })
+        .Case("op",    [&] { return builder.getType<OpType>(); })
+        .Case("cop",   [&] { return parseCOpType(parser); })
+        .Case("circ",  [&] { return builder.getType<CircType>(); })
+        .Default([&] { return EMIT_ERROR(parser, "unrecognized quantum type!"), nullptr; })();
 
-    parser.emitError(parser.getNameLoc(), "Unrecognized quantum type!");
-    return Type();
+    return result;
+}
+
+Type QuantumDialect::parseQuregType(DialectAsmParser &parser) {
+    StringRef errmsg = "error during 'Qureg' type parsing!";
+    llvm::Optional<int> optionalSize;
+    int size;
+
+    if (parser.parseLess())
+        return EMIT_ERROR(parser, errmsg), nullptr;
+
+    auto res = parser.parseOptionalInteger<int>(size);
+    if (res.hasValue() && failed(res.getValue()))
+        return EMIT_ERROR(parser, errmsg), nullptr;
+    optionalSize = res.hasValue() ? llvm::Optional<int>(size) : llvm::None;
+
+    if (parser.parseGreater())
+        return EMIT_ERROR(parser, errmsg), nullptr;
+
+    return parser.getBuilder().getType<QuregType>(optionalSize);
+}
+
+Type QuantumDialect::parseCOpType(DialectAsmParser &parser) {
+    StringRef errmsg = "error during 'COp' type parsing!";
+    Type baseType(nullptr);
+    int nctrl;
+
+    if (parser.parseLess() || parser.parseInteger<int>(nctrl))
+        return EMIT_ERROR(parser, errmsg), nullptr;
+
+    if (succeeded(parser.parseOptionalComma()))
+        if (parser.parseType(baseType))
+            return EMIT_ERROR(parser, errmsg), nullptr;
+
+    if (parser.parseGreater())
+        return EMIT_ERROR(parser, errmsg), nullptr;
+
+    if (baseType && !(baseType.isa<OpType>() || baseType.isa<CircType>()))
+        return EMIT_ERROR(parser, "Base type of controlled op must be either 'Op' or 'Circ' type!"),
+               nullptr;
+
+    return parser.getBuilder().getType<COpType>(nctrl, baseType);
 }
 
 

@@ -32,6 +32,10 @@ def Quantum_Dialect : Dialect {
         the compilation and optimization of quantum programs.
     }];
     let cppNamespace = "quantum";
+    let extraClassDeclaration = [{
+        static Type parseQuregType(DialectAsmParser &);
+        static Type parseCOpType(DialectAsmParser &);
+    }];
 }
 
 // Base class for all operations in this dialect

@@ -24,6 +24,11 @@ def QuantumSSA_Dialect : Dialect {
         cloning theorem, as this implicit in the structure of memory semantics.
     }];
     let cppNamespace = "quantumssa";
+    let extraClassDeclaration = [{
+        static Type parseRstateType(DialectAsmParser &);
+        static Type parseCOpType(DialectAsmParser &);
+        static Type parseFunCircType(DialectAsmParser &);
+    }];
 }
 
 // Base class for all operations in this dialect
