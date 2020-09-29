@@ -36,7 +36,7 @@ def RegAccessInterface : OpInterface<"RegAccessInterface"> {
         auto concreteOp = cast<ConcreteOp>($_op);
         auto segmentSizeAttr = concreteOp.getAttrOfType<DenseIntElementsAttr>(concreteOp.getOperandSegmentSizeAttr());
         auto isRegLike = concreteOp.getRegLikeArray().first;
-        unsigned absoluteIdx = 0, regLikeIdx = 0, encounteredRegLikes = 0;
+        unsigned regLikeIdx = 0, encounteredRegLikes = 0;
 
         for (unsigned i = 0; i < concreteOp.getSegmentSizesArraySize(); i++) {
             unsigned numOperands = (*(segmentSizeAttr.begin() + i)).getZExtValue();

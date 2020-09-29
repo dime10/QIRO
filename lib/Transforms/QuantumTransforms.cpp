@@ -52,14 +52,14 @@ struct MemToValPass : public OperationPass<ModuleOp> {
     }
 
 private:
-    using value_map = std::unordered_map<mlir::Value, mlir::Value>;
+    using value_map = std::unordered_map<Value, Value>;
     // keep a record of the latest qubit state to replace qubit values with
     value_map globalStateMap;
     value_map localStateMap;
     // temporary storage for newly created functions
     Operation *newfn;
     // storage for operands of parcirc ops since these need to be move to the call site (applyfc)
-    std::unordered_map<mlir::Value, llvm::SmallVector<mlir::Value, 4>> circArgMap;
+    std::unordered_map<Value, llvm::SmallVector<Value, 4>> circArgMap;
     // circuit counter to generate unique names
     unsigned numCirc;
 
@@ -227,7 +227,7 @@ public:
                 cast<FuncOp>(newOp).addEntryBlock();
 
                 // add new block argument values to the local storage
-                for (int i = 0; i < cast<FuncOp>(op).getNumArguments(); i++) {
+                for (unsigned i = 0; i < cast<FuncOp>(op).getNumArguments(); i++) {
                     if (isQData(fn.getArgument(i).getType()))
                         qbmap[fn.getArgument(i)] = cast<FuncOp>(newOp).getArgument(i);
                 }
@@ -250,7 +250,7 @@ public:
                 FunctionType calleeType = call.getCalleeType();
                 SmallVector<Value, 4> operands;
                 SmallVector<Type, 4> resultTypes;
-                for (auto &arg : call.getOperands()) {
+                for (auto arg : call.getOperands()) {
                     if (isQData(arg.getType())) {
                         operands.push_back(qbmap[arg]);
                         resultTypes.push_back(convDialectType(arg.getType(), opBuilder));
@@ -262,7 +262,7 @@ public:
                 CallOp::build(opBuilder, opState, callee, resultTypes, operands);
                 newOp = opBuilder.createOperation(opState);
 
-                for (int i = 0, j = 0; i < call.getNumOperands(); i++) {
+                for (unsigned i = 0, j = 0; i < call.getNumOperands(); i++) {
                     if (isQData(op->getOperand(i).getType()))
                         qbmap[op->getOperand(i)] = newOp->getResult(j++);
                 }
@@ -273,7 +273,7 @@ public:
                 // collect all external ssa values to generate equivalent function in second step
                 std::unordered_set<Value> uniqueValues;
                 for (auto &childOp : circOp.getOps()) {
-                    for (auto &arg : childOp.getOperands()) {
+                    for (auto arg : childOp.getOperands()) {
                         if (arg.getDefiningOp()->getParentOp() != op)
                             uniqueValues.insert(arg);
                     }
@@ -428,6 +428,6 @@ static PassRegistration<MemToValPass> memValPass(
 );
 
 // Pass creation functions declared in Passes.h
-std::unique_ptr<mlir::Pass> mlir::quantum::createMemToValPass() {
+std::unique_ptr<Pass> quantum::createMemToValPass() {
     return std::make_unique<MemToValPass>();
 }

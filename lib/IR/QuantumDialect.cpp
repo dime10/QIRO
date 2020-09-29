@@ -574,7 +574,7 @@ static ParseResult parseParametricCircuitOp(OpAsmParser &p, OperationState &resu
                                 " doesn't match expected "
                                 "(" + std::to_string(parsedOperands) + ")");
 
-    for (unsigned i = 0; i < parsedAccessors; i++) {
+    for (int i = 0; i < parsedAccessors; i++) {
         allOperandTypes.push_back(b.getIndexType());
     }
 

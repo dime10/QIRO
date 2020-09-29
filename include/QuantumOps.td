@@ -122,7 +122,7 @@ def GenRegOp : Quantum_Op<"genreg", [NoSideEffect]> {
             return this->emitOpError() << "requires >= 2 arguments to be combined into a register!";
 
         // tally the number of qubits from input types if available
-        unsigned totalqbs = 0;
+        int totalqbs = 0;
         bool lowerbound = false;
         for (auto argType : this->inputs().getTypes()) {
             if (argType.isa<QubitType>()) {
@@ -152,7 +152,9 @@ def GenRegOp : Quantum_Op<"genreg", [NoSideEffect]> {
             Value::user_range users = arg.getUsers();
             if (dyn_cast_or_null<GenRegOp>(*users.begin()) != *this) {
                 std::string errMsg("Operand value ");
-                arg.printAsOperand(llvm::raw_string_ostream(errMsg), AsmState(this->getParentOp()));
+                llvm::raw_string_ostream stream(errMsg);
+                AsmState state(this->getParentOp());
+                arg.printAsOperand(stream, state);
                 errMsg += " is invalid beyond current op, but detected further use!";
                 return this->emitError() << errMsg;
             }
@@ -751,7 +753,7 @@ def ControlOp : Quantum_Gate<"c", [Meta, AttrSizedOperandSegments, RegAccessInte
             return this->emitOpError() << "does not accept target qubits when controlling circuit!";
 
         // obtain total number of control qubits from input
-        unsigned totalctrls = 0;
+        int totalctrls = 0;
 
         if (heldOp.isa<COpType>())
             totalctrls += heldOp.cast<COpType>().getNumCtrls();

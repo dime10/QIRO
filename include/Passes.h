@@ -4,7 +4,7 @@
 namespace mlir {
 namespace quantum {
 
-std::unique_ptr<mlir::Pass> createMemToValPass();
+std::unique_ptr<Pass> createMemToValPass();
 
 } // end namespace quantum
 } // end namespace mlir
