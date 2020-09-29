@@ -31,7 +31,7 @@ def Quantum_Dialect : Dialect {
         This dialect is an example of a dialect designed to allow for
         the compilation and optimization of quantum programs.
     }];
-    let cppNamespace = "quantum";
+    let cppNamespace = "mlir::quantum";
     let extraClassDeclaration = [{
         static Type parseQuregType(DialectAsmParser &);
         static Type parseCOpType(DialectAsmParser &);

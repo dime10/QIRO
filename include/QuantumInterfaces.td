@@ -13,6 +13,8 @@ def RegAccessInterface : OpInterface<"RegAccessInterface"> {
         register accesses.
     }];
 
+    let cppNamespace = "mlir::quantum";
+
     let methods = [
         StaticInterfaceMethod<"Obtain the name of the i^th static range array attribute.",
             "StringRef", "getAccessorAttrName", (ins "unsigned" : $idx)

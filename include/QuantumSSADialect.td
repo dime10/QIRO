@@ -23,7 +23,7 @@ def QuantumSSA_Dialect : Dialect {
         side-effects, we are guarenteed that the program does not violate the no-
         cloning theorem, as this implicit in the structure of memory semantics.
     }];
-    let cppNamespace = "quantumssa";
+    let cppNamespace = "mlir::quantumssa";
     let extraClassDeclaration = [{
         static Type parseRstateType(DialectAsmParser &);
         static Type parseCOpType(DialectAsmParser &);
