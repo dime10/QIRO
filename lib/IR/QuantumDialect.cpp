@@ -266,19 +266,19 @@ static ParseResult parseOperandOrIntAttrList(OpAsmParser &parser, OperationState
 template<typename OpClass>
 static ParseResult parseOperandListWithAccessors(OpAsmParser &parser, OperationState &result,
         SmallVectorImpl<OpAsmParser::OperandType> &allOperands,
-        SmallVectorImpl<Type> &allOperandTypes, unsigned &parsed) {
+        SmallVectorImpl<Type> &allOperandTypes, SmallVectorImpl<int> &segmentSizes,
+        unsigned &parsed) {
     Builder b = parser.getBuilder();
-    SmallVector<int, 5> segmentSizes(OpClass::getSegmentSizesArraySize(), 0);
     ArrayRef<bool> isRegLike;
     unsigned numRegLike, currRegLike = 0;
     std::tie(isRegLike, numRegLike) = OpClass::getRegLikeArray();
 
-    unsigned totalParsed = 0; parsed = 0;
+    unsigned totalParsed = parsed, origParsed = parsed;
     do {
         OpAsmParser::OperandType currentOperand;
         auto res = parser.parseOptionalOperand(currentOperand);
-        if (res.hasValue()){
-            if (failed(*res))
+        if (res.hasValue()) {
+            if (failed(res.getValue()))
                 return failure();
 
             allOperands.push_back(currentOperand);
@@ -304,7 +304,8 @@ static ParseResult parseOperandListWithAccessors(OpAsmParser &parser, OperationS
     // fill the static accessor array attributes for non-parsed operands with empty arrays
     while (currRegLike < numRegLike)
         result.addAttribute(OpClass::getAccessorAttrName(currRegLike++), b.getI64ArrayAttr({}));
-    result.addAttribute(OpClass::getOperandSegmentSizeAttr(), b.getI32VectorAttr(segmentSizes));
+    // return the number of (non-accessor) operands that were parsed here
+    parsed -= origParsed;
     return success();
 }
 
@@ -353,22 +354,33 @@ static ParseResult parseVariadicOperandWithAccessors(OpAsmParser &parser, Operat
 // Templated print function that handles all ops with the register access interface
 template<typename OpClass> static void print(OpAsmPrinter &p, OpClass op) {
     SmallVector<StringRef, 3> elidedAttrs;
+    ArrayRef<bool> isRegLikeValues = op.getRegLikeArray().first;
+    ArrayRef<bool> isRegLikeTypes = op.getRegLikeArray().first;
+    unsigned start = 0;
+
     p << op.getOperationName();
 
-    // In case of the Rz gate, print the angle parameter
-    if (std::is_same<OpClass, RzOp>::value) {
+    // In case of rotation gates, print the angle parameter
+    if (std::is_same<OpClass, RzOp>::value || std::is_same<OpClass, ROp>::value) {
         p << "(";
-        p.printAttributeWithoutType(op.getAttrOfType<FloatAttr>("phi"));
+        if (op.getNumOperands() && op.getOperand(0).getType().isa<FloatType>()) {
+            p.printOperand(op.getOperand(0));
+            start++;
+        } else {
+            p.printAttributeWithoutType(op.getAttrOfType<FloatAttr>("static_phi"));
+            isRegLikeTypes = isRegLikeTypes.drop_front(1);
+        }
         p << ")";
-        elidedAttrs.push_back("phi");
+        elidedAttrs.push_back("static_phi");
+        isRegLikeValues = isRegLikeValues.drop_front(1);
     }
 
     // print all operands, including any register indeces in brackets
-    for (unsigned totIdx = 0, argIdx = 0, reglikeIdx = 0; totIdx < op.getOperands().size();) {
+    for (unsigned totIdx = start, argIdx = 0, reglikeIdx = 0; totIdx < op.getOperands().size();) {
         p << " ";
         p.printOperand(op.getOperand(totIdx++));
 
-        if (op.getRegLikeArray().first[argIdx++]) {
+        if (isRegLikeValues[argIdx++]) {
             ArrayAttr array = op.getAttrOfType<ArrayAttr>(op.getAccessorAttrName(reglikeIdx++));
             if (array.size())
                 p << "[";
@@ -399,7 +411,7 @@ template<typename OpClass> static void print(OpAsmPrinter &p, OpClass op) {
     for (unsigned totIdx = 0, argIdx = 0, reglikeIdx = 0; totIdx < op.getOperands().size();) {
         p << sep;
         p.printType(op.getOperand(totIdx++).getType());
-        if (op.getRegLikeArray().first[argIdx++]) {
+        if (isRegLikeTypes[argIdx++]) {
             ArrayAttr array = op.getAttrOfType<ArrayAttr>(op.getAccessorAttrName(reglikeIdx++));
             for (auto attr : array) {
                 // loop past the accessor operands
@@ -466,28 +478,45 @@ static void print(OpAsmPrinter &p, ParametricCircuitOp op) {
 // for each of the operands of type 'qureg'. Note that the type of the indeces (if given as SSA
 // value) must not be specified, and is assumed to be IndexType.
 template<typename OpClass>
-static ParseResult parseRegAccessOps(OpAsmParser &p, OperationState &result, bool param = false) {
+static ParseResult parseRegAccessOps(OpAsmParser &p, OperationState &result) {
     // The most operands a gate can have is: heldOp (1), ctrl (1+3), trgt (1+3) = 9
     SmallVector<OpAsmParser::OperandType, 9> allOperands;
     SmallVector<Type, 9> allOperandTypes;
     SmallVector<Type, 3> nonAccessorOperandTypes;
     SmallVector<Type, 1> allReturnTypes;
-    unsigned numMissingTypes;
+    SmallVector<int, 5> segmentSizes(OpClass::getSegmentSizesArraySize(), 0);
+    unsigned numMissingTypes = 0, parsed = 0;
+    Builder b = p.getBuilder();
 
-    if (param) {
+    if (std::is_same<OpClass, RzOp>::value || std::is_same<OpClass, ROp>::value) {
         FloatAttr phiAttr;
+        OpAsmParser::OperandType phiVal;
         if (p.parseLParen())
             return failure();
-        if (p.parseAttribute(phiAttr, "phi", result.attributes))
+        auto res = p.parseOptionalAttribute(phiAttr, "static_phi", result.attributes);
+        if (res.hasValue() && failed(res.getValue()))
             return failure();
+        res = p.parseOptionalOperand(phiVal);
+        if (res.hasValue()) {
+            if (failed(res.getValue()))
+                return failure();
+            allOperands.push_back(phiVal);
+            allOperandTypes.push_back(nullptr);
+            segmentSizes[0] = 1;
+            numMissingTypes++;
+        }
         if (p.parseRParen())
             return failure();
+        // for remainder of parsing, skip first element in regLike array, as it has been parsed now
+        parsed++;
     }
 
     llvm::SMLoc allOperandLoc = p.getCurrentLocation();
     if (parseOperandListWithAccessors<OpClass>(p, result, allOperands, allOperandTypes,
-                                               numMissingTypes))
+                                               segmentSizes, parsed))
         return failure();
+    result.addAttribute(OpClass::getOperandSegmentSizeAttr(), b.getI32VectorAttr(segmentSizes));
+    numMissingTypes += parsed;
 
     if (p.parseOptionalAttrDict(result.attributes))
         return failure();

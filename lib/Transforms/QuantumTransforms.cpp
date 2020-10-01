@@ -107,10 +107,10 @@ private:
         return outType;
     }
 
-    static void parseBuildParams(Operation *op, value_map &qbmap, Builder &builder,
+    static void parseBuildParams(Operation *op, value_map &qbmap, OpBuilder &builder, Value &phi,
                                  Value &ctrl, Value &ctrlState, Value &trgt, Value &trgtState,
                                  Value &heldOp, Type &retType, OperationState &opState) {
-        heldOp = ctrl = ctrlState = trgt = trgtState = nullptr;
+        phi = heldOp = ctrl = ctrlState = trgt = trgtState = nullptr;
         if (isa<quantum::HOp>(op)) {
             trgt = cast<quantum::HOp>(op).qbs();
             opState = OperationState(op->getLoc(), HOp::getOperationName());
@@ -118,8 +118,25 @@ private:
             trgt = cast<quantum::XOp>(op).qbs();
             opState = OperationState(op->getLoc(), XOp::getOperationName());
         } else if (isa<quantum::RzOp>(op)) {
+            if (auto phiattr = cast<quantum::RzOp>(op).static_phiAttr()) {
+                OperationState auxState(op->getLoc(), ConstantOp::getOperationName());
+                ConstantOp::build(builder, auxState, builder.getF64Type(), phiattr);
+                phi = builder.createOperation(auxState)->getResult(0);
+            } else {
+                phi = cast<quantum::RzOp>(op).phi();
+            }
             trgt = cast<quantum::RzOp>(op).qbs();
             opState = OperationState(op->getLoc(), RzOp::getOperationName());
+        } else if (isa<quantum::ROp>(op)) {
+            if (auto phiattr = cast<quantum::ROp>(op).static_phiAttr()) {
+                OperationState auxState(op->getLoc(), ConstantOp::getOperationName());
+                ConstantOp::build(builder, auxState, builder.getF64Type(), phiattr);
+                phi = builder.createOperation(auxState)->getResult(0);
+            } else {
+                phi = cast<quantum::ROp>(op).phi();
+            }
+            trgt = cast<quantum::ROp>(op).qbs();
+            opState = OperationState(op->getLoc(), ROp::getOperationName());
         } else if (isa<quantum::CNotOp>(op)) {
             ctrl = cast<quantum::CNotOp>(op).ctrl();
             trgt = cast<quantum::CNotOp>(op).qbs();
@@ -158,7 +175,7 @@ public:
             op->print(llvm::errs());
             opBuilder.setInsertionPoint(op);
             OperationState opState(op->getLoc(), op->getName());
-            Value heldOp, ctrl, ctrlState, trgt, trgtState; Type retType;
+            Value phi, heldOp, ctrl, ctrlState, trgt, trgtState; Type retType;
             Operation *newOp = nullptr;
 
             if (isa<quantum::AllocOp>(op) || isa<quantum::AllocRegOp>(op)) {
@@ -177,26 +194,26 @@ public:
                 // can't remove the op yet as it's return value is still needed for the qubit map
 
             } else if (isa<quantum::HOp>(op) || isa<quantum::XOp>(op) || isa<quantum::RzOp>(op) ||
-                       isa<quantum::CNotOp>(op) || isa<quantum::ControlOp>(op) ||
-                       isa<quantum::AdjointOp>(op)) {
+                       isa<quantum::ROp>(op) || isa<quantum::CNotOp>(op) ||
+                       isa<quantum::ControlOp>(op) || isa<quantum::AdjointOp>(op)) {
                 // Regroup all quantum "gate" operations here as they have a very similar pattern
                 parseBuildParams(op, qbmap, opBuilder,
-                                 ctrl, ctrlState, trgt, trgtState, heldOp, retType, opState);
+                                 phi, ctrl, ctrlState, trgt, trgtState, heldOp, retType, opState);
 
-                if (isa<quantum::HOp>(op)) {
+                if (isa<quantum::HOp>(op))
                     HOp::build(opBuilder, opState, retType, trgtState);
-                } else if (isa<quantum::XOp>(op)) {
+                else if (isa<quantum::XOp>(op))
                     XOp::build(opBuilder, opState, retType, trgtState);
-                } else if (isa<quantum::RzOp>(op)) {
-                    FloatAttr phi = op->getAttrOfType<FloatAttr>("phi");
-                    RzOp::build(opBuilder, opState, retType, trgtState, phi);
-                } else if (isa<quantum::CNotOp>(op)) {
+                else if (isa<quantum::RzOp>(op))
+                    RzOp::build(opBuilder, opState, retType, phi, trgtState);
+                else if (isa<quantum::ROp>(op))
+                    ROp::build(opBuilder, opState, retType, phi, trgtState);
+                else if (isa<quantum::CNotOp>(op))
                     CNotOp::build(opBuilder, opState, retType, ctrlState, trgtState);
-                } else if (isa<quantum::ControlOp>(op)) {
+                else if (isa<quantum::ControlOp>(op))
                     ControlOp::build(opBuilder, opState, retType, heldOp, ctrlState, trgtState);
-                } else if (isa<quantum::AdjointOp>(op)) {
+                else if (isa<quantum::AdjointOp>(op))
                     AdjointOp::build(opBuilder, opState, retType, heldOp, trgtState);
-                }
                 newOp = opBuilder.createOperation(opState);
 
                 // cleanup

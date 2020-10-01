@@ -183,12 +183,13 @@ def RzOp : QuantumSSA_Gate<"RZ", [Unitary]> {
         The Rz gate is a single Qubit unitary.
         It rotates a qubit state by an angle φ along the z-axis.
         Its 2x2 matrix representation in the computational basis is given by:
-            [[1,   0 ],
-             [0, e^iφ]]
+            [[e^-iφ/2,    0  ],
+             [   0   , e^iφ/2]]
 
         This operation takes a qubit or register state as input and returns an
-        updated state. The parameter φ is passed as an attribute. Alternatively,
-        if no target is provided, the operation is returned.
+        updated state. The parameter φ is mandatory and can be provided as an
+        attribute or operand. Alternatively, if no target is provided, the
+        operation is returned.
 
         Example:
 
@@ -209,8 +210,8 @@ def RzOp : QuantumSSA_Gate<"RZ", [Unitary]> {
     }];
 
     let arguments = (ins
-        Optional<QData_Type> : $qbs,
-        APFloatAttr : $phi
+        AnyFloat : $phi,
+        Optional<QData_Type> : $qbs
     );
 
     let results = (outs
@@ -218,7 +219,35 @@ def RzOp : QuantumSSA_Gate<"RZ", [Unitary]> {
     );
 
     let assemblyFormat = [{
-        `(` $phi `)` ($qbs^ `:` type($qbs))? `->` type(results) attr-dict
+        `(` $phi `)` ($qbs^)? `:` type(operands) `->` type(results) attr-dict
+    }];
+}
+
+def ROp : QuantumSSA_Gate<"R", [Unitary]> {
+    let summary = "Rotation gate.";
+    let description = [{
+        The R gate is a single Qubit unitary.
+        It rotates a qubit state by an angle φ about the |1> state.
+        Its 2x2 matrix representation in the computational basis is given by:
+            [[1,   0 ],
+             [0, e^iφ]]
+
+        This operation takes a qubit or register state as input and returns an
+        updated state. The parameter φ is mandatory and must be provided as an
+        operand. Alternatively, if no target is provided, the operation is returned.
+    }];
+
+    let arguments = (ins
+        AnyFloat : $phi,
+        Optional<QData_Type> : $qbs
+    );
+
+    let results = (outs
+        QDataOrOp_Type : $res
+    );
+
+    let assemblyFormat = [{
+        `(` $phi `)` ($qbs^)? `:` type(operands) `->` type(results) attr-dict
     }];
 }
 

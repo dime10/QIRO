@@ -3,6 +3,8 @@
 //===------------------------------------------------------------------------------------------===//
 
 module {
+    %fp = constant 1.0 : f64
+
     %q0_0 = qs.alloc -> !qs.qstate
     %r0_0 = qs.allocreg(4) -> !qs.rstate<4>
 
@@ -15,18 +17,19 @@ module {
     //%q0_3 = qs.H %r0_1 : !qs.rstate<4> -> !qs.qstate  // cannot mix qubit & register states
 
     %q0_3 = qs.X %q0_2 : !qs.qstate -> !qs.qstate
-    %q0_4 = qs.RZ(0.1) %q0_3 : !qs.qstate -> !qs.qstate
-    %q0_5 = qs.CX %q0_0, %q0_4 : !qs.qstate, !qs.qstate -> !qs.qstate
+    %q0_4 = qs.RZ(%fp) %q0_3 : f64, !qs.qstate -> !qs.qstate
+    %q0_5 = qs.R(%fp) %q0_4 : f64, !qs.qstate -> !qs.qstate
+    %q0_6 = qs.CX %q0_0, %q0_5 : !qs.qstate, !qs.qstate -> !qs.qstate
     %r0_2 = qs.CX %q0_0, %r0_1 : !qs.qstate, !qs.rstate<4> -> !qs.rstate<4>
     //%q0_6 = qs.CX %q0_5, %q0_5 : !qs.qstate, !qs.qstate -> !qs.qstate // same trgt & ctrl
 
     %ch = qs.c %h, %q0_0 : !qs.op, !qs.qstate -> !qs.cop<1, !qs.op>
-    %q0_6 = qs.c %h, %q0_0, %q0_5 : !qs.op, !qs.qstate, !qs.qstate -> !qs.qstate
-    %q0_7 = qs.c %h, %r0_0, %q0_6 : !qs.op, !qs.rstate<4>, !qs.qstate -> !qs.qstate
+    %q0_7 = qs.c %h, %q0_0, %q0_6 : !qs.op, !qs.qstate, !qs.qstate -> !qs.qstate
+    %q0_8 = qs.c %h, %r0_0, %q0_7 : !qs.op, !qs.rstate<4>, !qs.qstate -> !qs.qstate
     %r0_3 = qs.c %h, %q0_0, %r0_2 : !qs.op, !qs.qstate, !qs.rstate<4> -> !qs.rstate<4>
 
     %ah = qs.adj %h : !qs.op -> !qs.op
-    %q0_8 = qs.adj %h, %q0_7 : !qs.op, !qs.qstate -> !qs.qstate
+    %q0_9 = qs.adj %h, %q0_8 : !qs.op, !qs.qstate -> !qs.qstate
     %r0_4 = qs.adj %h, %r0_3 : !qs.op, !qs.rstate<4> -> !qs.rstate<4>
 
     // test new return statement
@@ -45,9 +48,9 @@ module {
                           -> !qs.fcirc<(!qs.qstate) -> !qs.qstate>
 
     // execute the function circuits
-    %q0_9 = call @retTest(%q0_8) : (!qs.qstate) -> !qs.qstate
-    %q0_10 = qs.applyfc %circ(%q0_9) : !qs.fcirc<(!qs.qstate) -> !qs.qstate>, !qs.qstate -> !qs.qstate
-    %q0_11 = qs.applyfc %ccirc(%q0_10) : !qs.cop<1, !qs.fcirc<(!qs.qstate) -> !qs.qstate>>, !qs.qstate -> !qs.qstate
-    %q0_12 = qs.applyfc %acirc(%q0_11) : !qs.fcirc<(!qs.qstate) -> !qs.qstate>, !qs.qstate -> !qs.qstate
-    //%q0_13 = qs.applyfc %ch(%q0_12) : !qs.cop<1, !qs.op>> // only works on fcirc(-derived) types
+    %q0_10 = call @retTest(%q0_9) : (!qs.qstate) -> !qs.qstate
+    %q0_11 = qs.applyfc %circ(%q0_10) : !qs.fcirc<(!qs.qstate) -> !qs.qstate>, !qs.qstate -> !qs.qstate
+    %q0_12 = qs.applyfc %ccirc(%q0_11) : !qs.cop<1, !qs.fcirc<(!qs.qstate) -> !qs.qstate>>, !qs.qstate -> !qs.qstate
+    %q0_13 = qs.applyfc %acirc(%q0_12) : !qs.fcirc<(!qs.qstate) -> !qs.qstate>, !qs.qstate -> !qs.qstate
+    //%q0_14 = qs.applyfc %ch(%q0_13) : !qs.cop<1, !qs.op>> // only works on fcirc(-derived) types
 }

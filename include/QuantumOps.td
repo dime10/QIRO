@@ -300,8 +300,8 @@ def RzOp : Quantum_Gate<"RZ", [Unitary, AttrSizedOperandSegments, RegAccessInter
         The Rz gate is a single Qubit unitary.
         It rotates a qubit state by an angle φ along the z-axis.
         Its 2x2 matrix representation in the computational basis is given by:
-            [[1,   0 ],
-             [0, e^iφ]]
+            [[e^-iφ/2,    0  ],
+             [   0   , e^iφ/2]]
 
         This operation takes a qubit as input and returns an 'op' type.
         The parameter φ is passed as an attribute.
@@ -326,15 +326,26 @@ def RzOp : Quantum_Gate<"RZ", [Unitary, AttrSizedOperandSegments, RegAccessInter
     }];
 
     let arguments = (ins
+        Optional<AnyFloat> : $phi,
         Optional<QData_Type> : $qbs,
         Variadic<Index> : $range,
         I64ArrayAttr : $static_range,
-        APFloatAttr : $phi
+        OptionalAttr<APFloatAttr> : $static_phi
     );
 
     let results = (outs
         Optional<Op_Type> : $op
     );
+
+    let verifier = [{
+        if (this->phi() && this->static_phi())
+            return this->emitOpError() << "cannot accept angle as both operand & attribute!";
+
+        if (!this->phi() && !this->static_phi())
+            return this->emitOpError() << "required angle as either operand or attribute!";
+
+        return success();
+    }];
 
     let extraClassDeclaration = [{
         static StringRef getAccessorAttrName(unsigned i) {
@@ -347,16 +358,92 @@ def RzOp : Quantum_Gate<"RZ", [Unitary, AttrSizedOperandSegments, RegAccessInter
         }
 
         static std::pair<SmallVector<bool, 4>, unsigned> getRegLikeArray() {
-            return {SmallVector<bool, 4>({true}), 1};
+            return {SmallVector<bool, 4>({false, true}), 1};
         }
 
         static size_t getSegmentSizesArraySize() {
-            return 2;
+            return 3;
         }
     }];
 
     let printer = "return ::print<RzOp>(p, *this);";
-    let parser = "return ::parseRegAccessOps<RzOp>(parser, result, true);";
+    let parser = "return ::parseRegAccessOps<RzOp>(parser, result);";
+}
+
+def ROp : Quantum_Gate<"R", [Unitary, AttrSizedOperandSegments, RegAccessInterface]> {
+    let summary = "Rotation gate.";
+    let description = [{
+        The R gate is a single Qubit unitary.
+        It rotates a qubit state by an angle φ about the |1> state.
+        Its 2x2 matrix representation in the computational basis is given by:
+            [[1,   0 ],
+             [0, e^iφ]]
+
+        This operation takes a qubit as input and returns an 'op' type.
+        The parameter φ is passed as an attribute.
+        It acts on the qubits via side-effect by changing the quantum state.
+
+        Example:
+
+        ```mlir
+        %0 = "q.alloc"() : () -> !q.qubit
+        %1 = "q.allocreg"() {size=4} : () -> !q.qureg<4>
+        // Apply a rotation by angle 0.1 to qubit %0
+        "q.R"(%0) {phi=0.1}: (!q.qubit) -> ()
+        // Apply a rotation by angle 0.1 to each qubit in register %1
+        "q.R"(%1) {phi=0.1} : (!q.qureg<4>) -> ()
+        // OR in custom assembly format
+        q.R(0.1) %1 : !q.qureg<4>
+        // Generate R gate without application to qubits (to be manipulated via meta-ops)
+        $op = "q.R"() {phi=0.1} : () -> !q.op
+        // OR in custom assembly format
+        %op = q.R(0.1) -> !q.op
+        ```
+    }];
+
+    let arguments = (ins
+        Optional<AnyFloat> : $phi,
+        Optional<QData_Type> : $qbs,
+        Variadic<Index> : $range,
+        I64ArrayAttr : $static_range,
+        OptionalAttr<APFloatAttr> : $static_phi
+    );
+
+    let results = (outs
+        Optional<Op_Type> : $op
+    );
+
+    let verifier = [{
+        if (this->phi() && this->static_phi())
+            return this->emitOpError() << "cannot accept angle as both operand & attribute!";
+
+        if (!this->phi() && !this->static_phi())
+            return this->emitOpError() << "required angle as either operand or attribute!";
+
+        return success();
+    }];
+
+    let extraClassDeclaration = [{
+        static StringRef getAccessorAttrName(unsigned i) {
+            assert(i == 0 && "There is only 1 QData operand for the RzOp!");
+            return "static_range";
+        }
+
+        static SmallVector<StringRef, 2> getAccessorAttrNames() {
+            return {"static_range"};
+        }
+
+        static std::pair<SmallVector<bool, 4>, unsigned> getRegLikeArray() {
+            return {SmallVector<bool, 4>({false, true}), 1};
+        }
+
+        static size_t getSegmentSizesArraySize() {
+            return 3;
+        }
+    }];
+
+    let printer = "return ::print<ROp>(p, *this);";
+    let parser = "return ::parseRegAccessOps<ROp>(parser, result);";
 }
 
 def CNotOp : Quantum_Gate<"CX", [Unitary, Hermitian, AttrSizedOperandSegments, RegAccessInterface]>{

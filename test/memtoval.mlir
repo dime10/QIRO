@@ -17,9 +17,14 @@ q.X %0 : !q.qubit
 q.X %2 : !q.qureg<4>
 %op2 = q.X -> !q.op
 
+%fp = constant 1.0 : f64
 q.RZ(0.1) %0 : !q.qubit
-q.RZ(0.1) %2 : !q.qureg<4>
+q.RZ(%fp) %2 : f64, !q.qureg<4>
 %op4 = q.RZ(0.1) -> !q.op
+
+q.R(%fp) %0 : f64, !q.qubit
+q.R(0.1) %2 : !q.qureg<4>
+%op5 = q.R(%fp) : f64 -> !q.op
 
 q.CX %0, %1 : !q.qubit, !q.qubit
 q.CX %0, %2 : !q.qubit, !q.qureg<4>
