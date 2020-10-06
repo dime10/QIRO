@@ -2,11 +2,14 @@
 // Test module for the conversion pass between the Quantum and QuantumSSA dialect
 //===------------------------------------------------------------------------------------------===//
 
+%s = constant 8 : index
+
 // test register operations (extracting qubit, slicing register, combining to register)
 %0 = "q.alloc"() : () -> !q.qubit
 %1 = q.alloc -> !q.qubit
 
 %2 = q.allocreg(4) -> !q.qureg<4>
+%3 = q.allocreg(%s) : index -> !q.qureg<>
 
 // test basic gates, including their custom assembly formats
 q.H %0 : !q.qubit

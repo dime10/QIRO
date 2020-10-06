@@ -70,22 +70,39 @@ def AllocRegOp : QuantumSSA_Op<"allocreg"> {
 
         ```mlir
         // Allocate qubit register
-        %reg = "qs.allocreg"() {size=4} : () -> !qs.rstate<4>
+        %reg = "qs.allocreg"() {static_size=4} : () -> !qs.rstate<4>
         // OR in custom assembly format
         %reg = qs.allocreg(4) -> !qs.rstate<4>
         ```
     }];
 
     let arguments = (ins
-        Confined<APIntAttr, [IntMinValue<2>]> : $size
+        Optional<Index> : $size,
+        OptionalAttr<Confined<APIntAttr, [IntNonNegative]>> : $static_size
     );
 
     let results = (outs
         Rstate_Type : $reg
     );
 
+    let verifier = [{
+        if (this->size() && this->static_size())
+            return this->emitOpError() << "cannot provide register size as attribute AND operand!";
+        if (!this->size() && !this->static_size())
+            return this->emitOpError() << "requires a register size!";
+
+        // check return type matches type of argument
+        RstateType regType = this->reg().getType().cast<RstateType>();
+        if (this->size() && regType.getNumQubits())
+            return this->emitOpError() << "can't return type with static param if size is dynamic!";
+        if (this->static_size() && !regType.getNumQubits())
+            return this->emitOpError() << "must return type with static param if size is static!";
+
+        return success();
+    }];
+
     let assemblyFormat = [{
-        `(`$size`)` attr-dict `->` type($reg)
+        `(` ($static_size^ `)`)? ($size^ `)` `:` type($size))? `->` type(results) attr-dict
     }];
 }
 

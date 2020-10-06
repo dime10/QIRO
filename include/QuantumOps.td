@@ -69,22 +69,39 @@ def AllocRegOp : Quantum_Op<"allocreg"> {
 
         ```mlir
         // Allocate qubit register
-        %reg = "q.allocreg"() {size=4} : () -> !q.qureg<4>
+        %reg = "q.allocreg"() {static_size=4} : () -> !q.qureg<4>
         // OR in custom assembly format
         %reg = q.allocreg(4) -> !q.qureg<4>
         ```
     }];
 
     let arguments = (ins
-        Confined<APIntAttr, [IntMinValue<2>]> : $size
+        Optional<Index> : $size,
+        OptionalAttr<Confined<APIntAttr, [IntMinValue<2>]>> : $static_size
     );
 
     let results = (outs
         Qureg_Type : $reg
     );
 
+    let verifier = [{
+        if (this->size() && this->static_size())
+            return this->emitOpError() << "cannot provide register size as attribute AND operand!";
+        if (!this->size() && !this->static_size())
+            return this->emitOpError() << "requires a register size!";
+
+        // check return type matches type of argument
+        QuregType regType = this->reg().getType().cast<QuregType>();
+        if (this->size() && regType.getNumQubits())
+            return this->emitOpError() << "can't return type with static param if size is dynamic!";
+        if (this->static_size() && !regType.getNumQubits())
+            return this->emitOpError() << "must return type with static param if size is static!";
+
+        return success();
+    }];
+
     let assemblyFormat = [{
-        `(`$size`)` attr-dict `->` type($reg)
+        `(` ($static_size^ `)`)? ($size^ `)` `:` type($size))? `->` type(results) attr-dict
     }];
 }
 

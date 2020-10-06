@@ -8,14 +8,17 @@ module {
     %b = constant 3 : index
     %s = constant 2 : index
     %fp = constant 1.0 : f64
+    %size = constant 8 : index
 
 
     // test allocation ops
     %0 = "q.alloc"() : () -> !q.qubit
     %1 =  q.alloc -> !q.qubit
 
-    %2 = "q.allocreg"() {size=4} : () -> !q.qureg<4>
+    %2 = "q.allocreg"() {static_size=4} : () -> !q.qureg<4>
     %3 =  q.allocreg(4) -> !q.qureg<4>
+    %4 = "q.allocreg"(%size) : (index) -> !q.qureg<>
+    %5 =  q.allocreg(%size) : index -> !q.qureg<>
 
 
     // test basic gates, including their custom assembly formats

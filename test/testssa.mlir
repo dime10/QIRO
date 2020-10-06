@@ -4,9 +4,11 @@
 
 module {
     %fp = constant 1.0 : f64
+    %size = constant 8 : index
 
     %q0_0 = qs.alloc -> !qs.qstate
     %r0_0 = qs.allocreg(4) -> !qs.rstate<4>
+    %r1_0 = qs.allocreg(%size) : index -> !qs.rstate<>
 
     %h = qs.H -> !qs.op
     %q0_1 = qs.H %q0_0 : !qs.qstate -> !qs.qstate

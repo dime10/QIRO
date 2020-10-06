@@ -183,10 +183,11 @@ public:
                     opState = OperationState(op->getLoc(), AllocQbOp::getOperationName());
                     AllocQbOp::build(opBuilder, opState, opBuilder.getType<QstateType>());
                 } else {
-                    IntegerAttr numQubits = cast<quantum::AllocRegOp>(op).sizeAttr();
-                    RstateType rstateType = opBuilder.getType<RstateType>(numQubits.getInt());
+                    quantum::AllocRegOp regOp = cast<quantum::AllocRegOp>(op);
+                    IntegerAttr staticSize = regOp.static_sizeAttr();
+                    Type regType = convDialectType(regOp.reg().getType(), opBuilder);
                     opState = OperationState(op->getLoc(), AllocRegOp::getOperationName());
-                    AllocRegOp::build(opBuilder, opState, rstateType, numQubits);
+                    AllocRegOp::build(opBuilder, opState, regType, regOp.size(), staticSize);
                 }
                 newOp = opBuilder.createOperation(opState);
 
