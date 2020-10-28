@@ -4,6 +4,9 @@
 #include "mlir/IR/Dialect.h"
 #include "mlir/IR/Builders.h"
 #include "mlir/IR/StandardTypes.h"
+#include "mlir/IR/FunctionSupport.h"
+#include "mlir/Interfaces/SideEffectInterfaces.h"
+#include "mlir/Interfaces/CallInterfaces.h"
 
 #include "QuantumDialect.h" // required for the unitary, hermitian, and metaop traits
 
@@ -68,11 +71,11 @@ public:
 };
 
 // This class represents a quantum circuit, that is, a collection of quantum ops.
-class FunCircType : public Type::TypeBase<FunCircType, mlir::Type, mlir::TypeStorage> {
+class CircType : public Type::TypeBase<CircType, mlir::Type, mlir::TypeStorage> {
 public:
     using Base::Base;
 
-    static FunCircType get(mlir::MLIRContext *ctx) {
+    static CircType get(mlir::MLIRContext *ctx) {
         return Base::get(ctx);
     }
 };

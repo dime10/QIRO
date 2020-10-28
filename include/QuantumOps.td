@@ -3,6 +3,7 @@
 
 include "QuantumDialect.td"
 include "QuantumInterfaces.td"
+include "mlir/IR/SymbolInterfaces.td"
 include "mlir/Interfaces/SideEffectInterfaces.td"
 include "mlir/Interfaces/CallInterfaces.td"
 
@@ -567,165 +568,209 @@ def TerminatorOp : Quantum_Op<"term", [Terminator]> {
     }];
 }
 
-def CircuitOp : Quantum_Op<"circ", [Unitary, ImplicitQuantumTerminator]> {
-    let summary = "Create a basic quantum circuit.";
+def CircuitOp : Quantum_Op<"circ", [Symbol, FunctionLike, IsolatedFromAbove,
+                                    AffineScope, ImplicitQuantumTerminator,
+                                    DeclareOpInterfaceMethods<CallableOpInterface>]> {
+    let summary = "Create a function-like quantum circuit.";
     let description = [{
-        A basic quantum circuit is a block regrouping multiple gates. No control
-        flow is allowed within such a block. However, these operations can then be
-        repeated, inverted, or controlled as as single unit. Note that contrary to
-        ops of type 'Quantum_Gate' (basic gates & meta ops), a basic circuit is
-        always considered "on hold" when defined, and thus always returns the op
-        type 'circ'. Note that all qubits used within the circuit are final and
-        must be defined in an enclosing scope, that is, the circuit cannot be
-        reapplied to a different set of qubits. See 'ParametricCircuitOp' for this
-        functionality.
+        A quantum circuit defines a custom operation on the quantum computer by
+        grouping multiple elementary gates or other circuit calls into one unit.
+        The main use of this is to reuse a gate sequence in multiple places in the
+        program, as well as apply the operation to different and differently-sized
+        qubit sets (if the circuit is defined parametrically).
 
-        Since the circuit body consists of a block, it must always be terminated
-        with the special 'TerminatorOp'. In custom assembly form this can be omitted.
+        The body of the circuit is contained within a region, defines an affine
+        scope for affine for loops, and is isolated from above, meaning no values
+        from outside this operation can be referenced in the body.
+
+        //While the arguments to circuit may be of any type to be as general as
+        //possible, there is a a requirement for quantum registers. For each such
+        //register that does not have a static size, an index argument indicating
+        //a lower limit on the size of the register is required immediately following
+        //the register argument.
+
+        Note: The containing block must always be terminated with the special
+              'TerminatorOp'. In custom assembly form this can be omitted.
 
         Example:
 
         ```mlir
-        %0 = "q.allocreg"() {size=3} : () -> !q.qureg<3>
-        %c = "q.circ"() ({
-            "q.H"(%0) : (!q.qureg<3>) -> ()
-            "q.bar"() : () -> ()
-        }) : () -> !q.circ
+        "q.circ"() ({
+        ^bb0(%r: !q.qureg<>):
+            "q.H"(%r) : (!q.qureg<>) -> ()
+            "q.term"() : () -> ()
+        }) {sym_name="h", type=(!q.qureg<>) -> ()} : () -> ()
         // OR in custom assembly
-        %c = q.circ {
-            "q.H"(%0) : (!q.qureg<3>) -> ()
-        } -> !q.circ
+        q.circ @h(%r: !q.qureg<>) {
+            "q.H"(%r) : (!q.qureg<>) -> ()
+        }
         ```
     }];
-
-    let arguments = (ins
-        OptionalAttr<StrAttr> : $name
-    );
-
-    let results = (outs
-        Circuit_Type
-    );
 
     let regions = (region
-        SizedRegion<1> : $gates
+        AnyRegion : $gates
     );
 
-    let assemblyFormat = [{
-        (`(` $name^ `)`)? regions attr-dict `->` type(results)
-    }];
-}
+    let extraClassDeclaration = [{
+        // FunctionLike trait needs access to the functions below.
+        friend class OpTrait::FunctionLike<CircuitOp>;
 
-def ParametricCircuitOp : Quantum_Op<"parcirc", [AttrSizedOperandSegments, RegAccessInterface,
-                                                 DeclareOpInterfaceMethods<CallOpInterface>]> {
-    let summary = "Instatiate a parametric quantum circuit.";
-    let description = [{
-        In contrast to a basic circuit, a parametric circuit is created with the
-        help of a function. The function contains the body of the circuit and must
-        take a non-negative circuit size parameter and a variadic list of acted-upon
-        qubits/regiters as input. This op then takes the function name and arguments
-        and instatiates a circuit op that can be further operated on by meta ops or
-        used with the application op.
-
-        ```mlir
-        func @fun(%n : index, %qbs : !q.qureg<4>) -> () {
-            %q = "q.extract"(%qbs) {idx=0} : (!q.qureg<4>) -> !q.qubit
-            "q.H"(%q) : (!q.qubit) -> ()
-            "q.term"() : () -> ()
+        // Required hooks for the input/output type enumeration in FunctionLike.
+        unsigned getNumFuncArguments() {
+            return OpTrait::FunctionLike<CircuitOp>::getType().getNumInputs();
+        }
+        unsigned getNumFuncResults() {
+            return OpTrait::FunctionLike<CircuitOp>::getType().getNumResults();
         }
 
-        %n = constant 4 : index
-        %0 = "q.allocreg"() {size=4} : () -> !q.qureg<4>
-        %pc = "q.parcirc"(%n, %0) {callee=@fun} : (index, !q.qureg<4>) -> !q.circ
-        // OR in custom assembly format
-        %pc = q.parcirc @fun(%n, %0) : (index, !q.qureg<4>) -> !q.circ
-        ```
+        // Verifies the type of the function for op specific invariants. Optional.
+        //LogicalResult verifyType() {
+        //    if (this->getNumFuncResults())
+        //        return this->emitOpError() << "cannot return any values!";
+        //     return success();
+        //}
+
+        // Verifies the body of the function for op specific invariants. Optional.
+        //LogicalResult verifyBody();
+    }];
+
+    let printer = [{ return ::print(p, *this); }];
+    let parser = [{ return ::parse$cppClass(parser, result); }];
+}
+
+def CircuitValueOp : Quantum_Op<"getval"> {
+    let summary = "Generate an SSA value for a circuit.";
+    let description = [{
+        Internal operation to generate SSA values of circuits given their
+        symbol name. The values are required to perform meta operations on
+        the circuits.
     }];
 
     let arguments = (ins
-        Variadic<QData_Type> : $qbs,
-        Variadic<Index> : $ranges,
-        2dI64ArrayAttr : $static_ranges,
-        FlatSymbolRefAttr : $callee,
-        Confined<APIntAttr, [IntPositive]> : $n
+        FlatSymbolRefAttr : $circref
     );
 
     let results = (outs
-        Circuit_Type
+        Circuit_Type : $circval
     );
 
     let verifier = [{
-        // tally the number of qubits from input types if available
-        unsigned totalqbs = 0;
-        bool lowerbound = false;
-        for (auto argType : this->qbs().getTypes()) {
-            if (argType.isa<QubitType>()) {
-                totalqbs++;
-            } else if (auto regType = argType.dyn_cast<QuregType>()) {
-                if (auto numQubits = regType.getNumQubits())
-                    totalqbs += *numQubits;
-                else
-                    lowerbound = true;
-            }
+        Operation *circOp = this->resolveCallable();
+        if (!circOp)
+            return this->emitOpError() << "could not resolve given symbol!";
+
+        if (!isa<CircuitOp>(circOp))
+            return this->emitOpError() << "symbol does not reference a 'CircuitOp'!";
+
+        return success();
+    }];
+
+    let extraClassDeclaration = [{
+        Operation *resolveCallable() {
+            return SymbolTable::lookupNearestSymbolFrom(this->getOperation(), this->circref());
+        }
+    }];
+
+    let assemblyFormat = [{
+        $circref attr-dict `->` type($circval)
+    }];
+}
+
+def CallCircOp : Quantum_Op<"call", [AttrSizedOperandSegments, RegAccessInterface,
+                                     DeclareOpInterfaceMethods<CallOpInterface>]> {
+    let summary = "Perform direct call to quantum circuit with given arguments.";
+    let description = [{
+        This operation is used to perform a call to a function-like quantum
+        circuit, which is referenced via a symbol attribute.
+
+        The operands, which can be of any type, are expected to match the
+        arguments defined in the circuit signature.
+
+        Example:
+
+        ```mlir
+        q.circ @h(%r: !q.qureg<>) {
+            "q.H"(%r) : (!q.qureg<>) -> ()
+            "q.term"() : () -> ()
         }
 
-        // if no registers of undeclared size were provided, make sure sufficient qubits are
-        // available for the circuit size parameter n
-        if (!lowerbound && this->n().ugt(totalqbs))
-            return this->emitOpError() << "has insufficient total qubits for size parameter n!";
+        %0 = "q.allocreg"() {n=4} : () -> !q.qureg<4>
 
-        // make sure the function exists
-        auto funptr = this->resolveCallable();
-        if (!funptr)
-            return this->emitOpError() << "cannot resolve given function!";
+        // Call circuit with qubit register %0
+        "q.call"(%0) {circref=@h} : (!q.qureg<4>) -> ()
+        // OR in custom assembly
+        q.call @h(%0) : !q.qureg<4>
+        ```
+    }];
+
+    let arguments = (ins
+        FlatSymbolRefAttr : $circref,
+        Variadic<AnyType> : $args,
+        Variadic<Index> : $ranges,
+        2dI64ArrayAttr : $static_ranges,
+        I64ArrayAttr : $size_params
+    );
+
+    let verifier = [{
+        // check 2d range attribute
+        if (this->static_ranges().size() != this->args().size())
+            return this->emitOpError() << "expected proper 2D static range attribute!";
+        // check size paramter attribute
+        if (this->size_params().size() < this->args().size())
+            return this->emitOpError() << "expected proper size param attribute!";
+
+        // check circuit symbol
+        Operation *callable = cast<CallOpInterface>(this->getOperation()).resolveCallable();
+        if (!callable)
+            return this->emitOpError() << "could not resolve given symbol!";
+
+        if (!isa<CircuitOp>(callable))
+            return this->emitOpError() << "symbol does not reference a 'CircuitOp'!";
 
         // make sure function arguments match
-        auto typeattr = funptr->getAttrDictionary().get("type").dyn_cast<TypeAttr>();
-        auto funtype = typeattr.getValue().dyn_cast<FunctionType>();
+        CircuitOp circOp = cast<CircuitOp>(callable);
+        FunctionType circType = circOp.OpTrait::FunctionLike<CircuitOp>::getType();
 
-        // compare number of arguments while ignoring parameter in function signature
-        if (funtype.getNumInputs()-1 != this->qbs().size())
-            return this->emitOpError() << "has wrong number of function arguments! "
-                                          "Signature requires: " << funtype.getNumInputs()-1 << ". "
-                                          "Got: " << this->getNumOperands() << ".";
+        // compare number of arguments with function signature
+        if (circType.getNumInputs() != this->size_params().size())
+            return this->emitOpError() << "has wrong number of circuit arguments! "
+                                          "Circuit requires: " << circType.getNumInputs() << ". "
+                                          "Got: " << this->size_params().size() << ".";
 
         // compare each parameter type:
-        //  - a !q.qureg must be matched with another !q.qureg, but only if both types have size
-        //    information will the given register be checked to be at least as large as required
-        //  - for all other types, they must match exactly
-        unsigned i = 0;
-        auto opargtypes = this->qbs().getTypes().begin();
-        for (auto argtype : funtype.getInputs()) {
-            if (i++ == 0) {
-                // make sure the circuit size parameter is declared in the function
-                if (!argtype.isa<IndexType>())
-                    return this->emitOpError() << "needs first function argument to be the circuit "
-                                                  "size with type 'index'!";
-                // for the rest, skip circuit parameter (first in arg list)
-                continue;
-            }
-
-            auto giventype = *opargtypes++;
-            if (auto atype = argtype.dyn_cast<QuregType>()) {
-                if (auto gtype = giventype.dyn_cast<QuregType>()) {
-                    if (gtype.getNumQubits() && atype.getNumQubits()) {
-                        if (*gtype.getNumQubits() < *atype.getNumQubits())
-                            return this->emitOpError()
-                                << "with insufficient qubits in register argument at position "
-                                << i-2 << ", as signature expects: " << *atype.getNumQubits()
-                                << ", but got: " << *gtype.getNumQubits() << "!";
-                    }
-                } else {
-                    return this->emitOpError() << "detected wrong argument type at position "
-                                               << i-2 << ", expected: " << argtype << ", "
-                                               << "but got: " << giventype << "!";
-                }
+        //  - in general all types must match the circuit signature exactly, with 2 exceptions
+        //  - index arguments can also be provided as static attributes, either all or none of them
+        //  - registers can appear in 2 forms in the circuit signature:
+        //      as !q.qureg<n> or !q.qureg<>, both of which can be matched with either, however
+        //      only in the case where both have size information will the given register be checked
+        //      to be at least as large as required, from which the first n qubits will be used
+        int numIdxArgs = 0;
+        int numSizeParams = this->size_params().size() - this->args().size();
+        std::string errMsg = "detected wrong argument type! Expected: ";
+        auto sigType = circType.getInputs().begin();
+        for (auto argType : this->args().getTypes()) {
+            if (sigType->isa<IndexType>()) {
+                if (!argType.isa<IndexType>() && !numSizeParams)
+                    return this->emitOpError() << errMsg << *sigType << ". Got: " << argType << ".";
+                numIdxArgs++;
+            } else if (auto sigRegType = sigType->dyn_cast<QuregType>()) {
+                if (auto argRegType = argType.dyn_cast<QuregType>())
+                    if (argRegType.getNumQubits() && sigRegType.getNumQubits())
+                        if (*argRegType.getNumQubits() < *sigRegType.getNumQubits())
+                            return this->emitOpError() << "too few qubits in register! Expected: "
+                                                       << *sigRegType.getNumQubits() << ". Got: "
+                                                       << *argRegType.getNumQubits() << ".";
+                else
+                    return this->emitOpError() << errMsg << *sigType << ". Got: " << argType << ".";
             } else {
-                if (argtype != giventype)
-                    return this->emitOpError() << "detected wrong argument type at position "
-                                               << i-2 << ", expected: " << argtype << ", "
-                                               << "but got: " << giventype << "!";
+                if (*sigType != argType)
+                    return this->emitOpError() << errMsg << *sigType << ". Got: " << argType << ".";
             }
+            sigType++;
         }
+        // verify enough static int attributes were provided for all index arguments
+        if (numSizeParams && numIdxArgs != numSizeParams)
+            return this->emitOpError() << "did not receive all index arguments as attributes!";
 
         return success();
     }];
@@ -747,64 +792,148 @@ def ParametricCircuitOp : Quantum_Op<"parcirc", [AttrSizedOperandSegments, RegAc
         static size_t getSegmentSizesArraySize() {
             return 2;
         }
-
-        Operation *resolveCallable() {
-            // If the callable isn't a value, lookup the symbol reference.
-            CallInterfaceCallable callable = this->getCallableForCallee();
-            if (auto symbolRef = callable.dyn_cast<SymbolRefAttr>())
-                return SymbolTable::lookupNearestSymbolFrom(*this, symbolRef);
-            return callable.get<Value>().getDefiningOp();
-        }
     }];
 
-    let printer = "return ::print(p, *this);";
-    let parser = "return ::parse$cppClass(parser, result);";
+    let assemblyFormat = [{
+        $circref `(`
+            custom<ApplyArgs>($args, $ranges, type($ranges), $static_ranges, $size_params)
+        `)` attr-dict `:` type($args)
+    }];
 }
 
-def ApplyCircOp : Quantum_Op<"apply"> {
-    let summary = "Apply circuit to quantum computer.";
+def ApplyCircOp : Quantum_Op<"apply", [AttrSizedOperandSegments, RegAccessInterface]> {
+    let summary = "Apply quantum circuit to given arguments.";
     let description = [{
-        This operation is solely meant to perform the application of a circuit
-        op or ops derived from a circuit op as these are always on hold when
-        created and remain that way when passed to meta-ops. It is not compatible
-        with other operations on hold as those require target qubits as arguments
-        in order to perform application.
+        In contrast to the call operation which uses a symbol to reference the
+        circuit, this operation calls a circuit via the provided SSA operand.
+        Typically, such a value is created to be manipulated via quantum meta
+        operations, and is ultimately applied to qubits via this op.
+
+        The circuit can be any value of type '!q.circ' or a type derived from
+        it, such as '!q.cop<n, !q.circ>.
+
+        The remaining operands, which can be of any type, will be forwarded
+        to the circuit, and must match its declared arguments. The exception
+        being index operands, which can also be provided as static attributes
+        for convenience.
 
         Example:
 
         ```mlir
-        %0 = "q.alloc"() : () -> !q.qubit
-        %1 = "q.alloc"() : () -> !q.qubit
-        %c = "q.circ"() ({
-            "q.H"(%0) : (!q.qubit) -> ()
-            "q.CX"(%1, %0) : (!q.qubit, !q.qubit) -> ()
-            "q.bar"() : () -> ()
-        }) : () -> !q.circ
-        // Apply circuit 4 times
-        affine.for %i = 0 to 4 {
-            "q.apply"(%c) : (!q.circ) -> ()
-        }
+        "q.circ"() ({
+        ^bb0(%r: !q.qureg<>):
+            "q.H"(%r) : (!q.qureg<>) -> ()
+            "q.term"() : () -> ()
+        }) {sym_name="h", type=(!q.qureg<>) -> ()} : () -> ()
+
+        %0 = "q.allocreg"() {n=4} : () -> !q.qureg<4>
+        %c = q.getval @h -> !q.circ
+
+        // Apply circuit to qubit register %0
+        "q.apply"(%c, %0) : (!q.circ, !q.qureg<4>) -> ()
         // OR in custom assembly
-        affine.for %i = 0 to 4 {
-            q.apply %c : !q.circ
-        }
+        q.apply %c(%0) : !q.circ(!q.qureg<4>)
+        ```
     }];
 
     let arguments = (ins
-        QCirc_Type : $circ
+        QCirc_Type : $circval,
+        Variadic<AnyType> : $args,
+        Variadic<Index> : $ranges,
+        2dI64ArrayAttr : $static_ranges,
+        I64ArrayAttr : $size_params
     );
 
     let verifier = [{
-        if (this->circ().getType().isa<COpType>() &&
-            (!this->circ().getType().cast<COpType>().getBaseType() ||
-             !this->circ().getType().cast<COpType>().getBaseType().isa<CircType>()))
-            return this->emitOpError() << "can only be applied to circuit(-derived) types!";
+        // check 2d range attribute
+        if (this->static_ranges().size() != this->args().size())
+            return this->emitOpError() << "expected proper 2D static range attribute!";
+        // check size paramter attribute
+        if (this->size_params().size() < this->args().size())
+            return this->emitOpError() << "expected proper size param attribute!";
+
+        if (auto copType = this->circval().getType().dyn_cast<COpType>())
+            if (!copType.getBaseType() || !copType.getBaseType().isa<CircType>())
+                return this->emitOpError() << "can only be applied to circuit(-derived) types!";
+
+        // make sure function arguments match
+        Operation *circValOp = this->circval().getDefiningOp();
+        while (!isa<CircuitValueOp>(circValOp)) {
+            if (auto cop = dyn_cast<ControlOp>(circValOp))
+                circValOp = cop.heldOp().getDefiningOp();
+            else
+                circValOp = cast<AdjointOp>(circValOp).heldOp().getDefiningOp();
+        }
+        Operation *circOp = cast<CircuitValueOp>(circValOp).resolveCallable();
+        FunctionType circType = cast<CircuitOp>(circOp).OpTrait::FunctionLike<CircuitOp>::getType();
+
+        // compare number of arguments while ignoring parameter in function signature
+        if (circType.getNumInputs() != this->size_params().size())
+            return this->emitOpError() << "has wrong number of circuit arguments! "
+                                          "Circuit requires: " << circType.getNumInputs() << ". "
+                                          "Got: " << this->size_params().size() << ".";
+
+        // compare each parameter type:
+        //  - in general all types must match the circuit signature exactly, with 2 exceptions
+        //  - index arguments can also be provided as static attributes, either all or none of them
+        //  - registers can appear in 2 forms in the circuit signature:
+        //      as !q.qureg<n> or !q.qureg<>, both of which can be matched with either
+        //      only in the case where both have size information will the given register be checked
+        //      to be at least as large as required, from which the first n qubits will be used
+        int numIdxArgs = 0;
+        int numSizeParams = this->size_params().size() - this->args().size();
+        std::string errMsg = "detected wrong argument type! Expected: ";
+        auto sigType = circType.getInputs().begin();
+        for (auto argType : this->args().getTypes()) {
+            if (sigType->isa<IndexType>()) {
+                if (!argType.isa<IndexType>() && !numSizeParams)
+                    return this->emitOpError() << errMsg << *sigType << ". Got: " << argType << ".";
+                numIdxArgs++;
+            } else if (auto sigRegType = sigType->dyn_cast<QuregType>()) {
+                if (auto argRegType = argType.dyn_cast<QuregType>())
+                    if (argRegType.getNumQubits() && sigRegType.getNumQubits())
+                        if (*argRegType.getNumQubits() < *sigRegType.getNumQubits())
+                            return this->emitOpError() << "too few qubits in register! Expected: "
+                                                       << *sigRegType.getNumQubits() << ". Got: "
+                                                       << *argRegType.getNumQubits() << ".";
+                else
+                    return this->emitOpError() << errMsg << *sigType << ". Got: " << argType << ".";
+            } else {
+                if (*sigType != argType)
+                    return this->emitOpError() << errMsg << *sigType << ". Got: " << argType << ".";
+            }
+            sigType++;
+        }
+        // verify enough static int attributes were provided for all index arguments
+        if (numSizeParams && numIdxArgs != numSizeParams)
+            return this->emitOpError() << "did not receive all index arguments as attributes!";
 
         return success();
     }];
 
+    let extraClassDeclaration = [{
+        static StringRef getAccessorAttrName(unsigned i) {
+            assert(i == 0 && "There is only 1 QData operands for the ParametricCircuitOp!");
+            return "static_ranges";
+        }
+
+        static SmallVector<StringRef, 2> getAccessorAttrNames() {
+            return {"static_ranges"};
+        }
+
+        static std::pair<SmallVector<bool, 4>, unsigned> getRegLikeArray() {
+            return {SmallVector<bool, 4>({false, true}), 1};
+        }
+
+        static size_t getSegmentSizesArraySize() {
+            return 3;
+        }
+    }];
+
     let assemblyFormat = [{
-        operands attr-dict `:` type(operands)
+        $circval `(`
+            custom<ApplyArgs>($args, $ranges, type($ranges), $static_ranges, $size_params)
+        `)` attr-dict `:` type($circval) `(` type($args) `)`
     }];
 }
 

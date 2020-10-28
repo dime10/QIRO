@@ -2,6 +2,8 @@
 #define QUANTUM_SSA_OPS
 
 include "QuantumSSADialect.td"
+include "mlir/IR/SymbolInterfaces.td"
+include "mlir/Interfaces/CallInterfaces.td"
 
 // Base class for "gates", i.e. operations executable on a quantum computer
 class QuantumSSA_Gate<string mnemonic, list<OpTrait> traits = []> : QuantumSSA_Op<mnemonic, traits> {
@@ -24,7 +26,7 @@ class QuantumSSA_Gate<string mnemonic, list<OpTrait> traits = []> : QuantumSSA_O
         } else if (!this->res().getType().isa<U1Type>() &&
                    !this->res().getType().isa<U2Type>() &&
                    !this->res().getType().isa<COpType>() &&
-                   !this->res().getType().isa<FunCircType>()) {
+                   !this->res().getType().isa<CircType>()) {
             return this->emitOpError() << "must return itself when no target given!";
         }
 
@@ -330,13 +332,14 @@ def CNotOp : QuantumSSA_Gate<"CX", [Unitary, Hermitian]> {
 def ReturnStateOp : QuantumSSA_Op<"return", [Terminator]> {
     let summary = "Return qubit states from a function.";
     let description = [{
-        This is an alternatice terminator opperation that can be
-        used to return qubit states from functions, since SSA values
-        inside functions are isolated from the rest of the program.
+        This is a terminator opperation for quantum circuits, which, compared to the
+        'quantum' dialect version, is able to return updated qubit states from a circuit
+        call. This is required as all SSA values inside the circuit live in their own
+        scope.
     }];
 
     let arguments = (outs
-        Variadic<QData_Type>
+        Variadic<QData_Type> : $retvals
     );
 
     let assemblyFormat = [{
@@ -344,77 +347,136 @@ def ReturnStateOp : QuantumSSA_Op<"return", [Terminator]> {
     }];
 }
 
-def FunCircOp : QuantumSSA_Op<"funcirc"> {
-    let summary = "Create a quantum circuit from a function.";
+def CircuitOp : QuantumSSA_Op<"circ", [Symbol, FunctionLike, IsolatedFromAbove, AffineScope,
+                                       DeclareOpInterfaceMethods<CallableOpInterface>]> {
+    let summary = "Create a function-like quantum circuit.";
     let description = [{
-        A "function" quantum circuit is a collection of gates that are grouped within
-        a function body. The function arguments allow the circuit to be fully parametric
-        if desired. The goal of this op is to generate a value with "circuit" type, to be
-        passed to meta operations. In a sense it is the SSA equivalent of the Circuit/
-        ParametricCircuitOp, as these cannot produce valid operations within the value
-        semantics framework.
-        In order to actually execute the circuit, one can use the apply operation on the
-        result of this op (or the result of subsequent meta ops), as well as directly
-        apply std.call on the function name with appropriate parameters.
+        A quantum circuit defines a custom operation on the quantum computer by
+        grouping multiple elementary gates or other circuit calls into one unit.
+        The main use of this is to reuse a gate sequence in multiple places in the
+        program, as well as apply the operation to different and differently-sized
+        qubit sets (if the circuit is defined parametrically).
+
+        The body of the circuit is contained within a region of a single block, so
+        no traditional MLIR control flow via block branching can be used. However,
+        the circuit op does define an affine scope for its body, which allows for
+        control flow via the affine dialect, such as affine.for and affine.if.
 
         Example:
 
         ```mlir
-        func @test(%qb : !qs.state) -> !qs.state {
-            qs.return %qb : !qs.state
+        "qs.circ"() ({
+        ^bb0(%r0: !qs.rstate<>):
+            %r1 = "qs.H"(%r0) : (!qs.rstate<>) -> !qs.rstate<>
+            "qs.return"(%r1) : (!qs.rstate<>) -> ()
+        }) {sym_name="h", type=(!q.rstate<>) -> !qs.rstate<>} : () -> ()
+        // OR in custom assembly
+        qs.circ @h(%r0: !qs.rstate<>) -> !qs.rstate<> {
+            %r1 = "qs.H"(%r0) : (!qs.rstate<>) -> !qs.rstate<>
+            "qs.return"(%r1) : (!qs.rstate<>) -> ()
         }
-        %circ = "qs.funcirc"() {"fun"=@test} : () -> !qs.fcirc
-        // OR in custom assembly form
-        %circ = qs.funcirc @test -> !qs.fcirc
         ```
     }];
 
+    let regions = (region
+        AnyRegion : $gates
+    );
+
+    let extraClassDeclaration = [{
+        // FunctionLike trait needs access to the functions below.
+        friend class OpTrait::FunctionLike<CircuitOp>;
+
+        FunctionType getType() {
+            return OpTrait::FunctionLike<CircuitOp>::getType();
+        }
+
+        // Required hooks for the input/output type enumeration in FunctionLike.
+        unsigned getNumFuncArguments() {
+            return this->getType().getNumInputs();
+        }
+        unsigned getNumFuncResults() {
+            return this->getType().getNumResults();
+        }
+
+        // Verifies the type of the function for op specific invariants. Optional.
+        LogicalResult verifyType();
+
+        // Verifies the body of the function for op specific invariants. Optional.
+        LogicalResult verifyBody();
+    }];
+
+    let printer = [{ return ::print(p, *this); }];
+    let parser = [{ return ::parse$cppClass(parser, result); }];
+}
+
+def CircuitValueOp : QuantumSSA_Op<"getval"> {
+    let summary = "Generate an SSA value for a circuit.";
+    let description = [{
+        Internal operation to generate SSA values of circuits given their
+        symbol name. The values are required to perform meta operations on
+        the circuits.
+    }];
+
     let arguments = (ins
-        FlatSymbolRefAttr : $fun,
-        OptionalAttr<Confined<APIntAttr, [IntPositive]>> : $n
+        FlatSymbolRefAttr : $circref
     );
 
     let results = (outs
-        FunctionCircuit_Type : $funcirc
+        Circuit_Type : $circval
     );
 
     let verifier = [{
-        // make sure the function exists
-        auto funptr = this->resolveCallable();
-        if (!funptr)
-            return this->emitOpError() << "cannot resolve given function!";
+        Operation *circOp = this->resolveCallable();
+        if (!circOp)
+            return this->emitOpError() << "could not resolve given symbol!";
+
+        if (!isa<CircuitOp>(circOp))
+            return this->emitOpError() << "symbol does not reference a 'CircuitOp'!";
 
         return success();
     }];
 
     let extraClassDeclaration = [{
         Operation *resolveCallable() {
-            SymbolRefAttr callable = this->funAttr();
-            return SymbolTable::lookupNearestSymbolFrom(*this, callable);
+            return SymbolTable::lookupNearestSymbolFrom(this->getOperation(), this->circref());
         }
     }];
 
     let assemblyFormat = [{
-        $fun (`(` $n^ `)`)? attr-dict `->` type(results)
+        $circref attr-dict `->` type($circval)
     }];
 }
 
-def ApplyFunCircOp : QuantumSSA_Op<"applyfc"> {
-    let summary = "Apply function circuits & derivates.";
+def CallCircOp : QuantumSSA_Op<"call", [DeclareOpInterfaceMethods<CallOpInterface>]> {
+    let summary = "Perform direct call to quantum circuit with given qubit arguments.";
     let description = [{
-        This operation used to apply a "function circuit" at the current location. It's
-        the SSA equivalent of the apply operation from the 'quantum' dialect.
+        This operation is used to perform a call to a function-like quantum
+        circuit, which is referenced via a symbol attribute.
 
-        The input type can either be 'fcirc' or a derivative thereof, such as
-        'cop<n, fcirc>'. The remaining arguments need to match the function signature
-        of the circuit exactly.
+        The operands, which can be of any type, are expected to match the
+        arguments defined in the circuit signature. It returns the updated
+        state for all qubits and registers given as input.
 
-        It returns the updated state for all qubits and registers given as input.
+        Example:
+
+        ```mlir
+        qs.circ @h(%r0: !qs.rstate<>) -> !qs.rstate<> {
+            %r1 = "qs.H"(%r0) : (!qs.rstate<>) -> !qs.rstate<>
+            "qs.return"(%r1) : (!qs.rstate<>) -> ()
+        }
+
+        %0 = "qs.allocreg"() {n=4} : () -> !qs.rstate<4>
+
+        // Call circuit with qubit register %0
+        %1 = "qs.call"(%0) {circref=@h} : (!qs.rstate<4>) -> !qs.rstate<4>
+        // OR in custom assembly
+        %1 = qs.call @h(%0) : !qs.rstate<4> -> !qs.rstate<4>
+        ```
     }];
 
     let arguments = (ins
-        QCirc_Type : $callee,
-        Variadic<AnyType> : $operands
+        FlatSymbolRefAttr : $circref,
+        Variadic<AnyType> : $args
     );
 
     let results = (outs
@@ -422,29 +484,142 @@ def ApplyFunCircOp : QuantumSSA_Op<"applyfc"> {
     );
 
     let verifier = [{
-        if (auto copType = this->callee().getType().dyn_cast<COpType>())
-            if (!copType.getBaseType() || !copType.getBaseType().isa<FunCircType>())
+        // check circuit symbol
+        Operation *callable = cast<CallOpInterface>(this->getOperation()).resolveCallable();
+        if (!callable)
+            return this->emitOpError() << "could not resolve given symbol!";
+
+        if (!isa<CircuitOp>(callable))
+            return this->emitOpError() << "symbol does not reference a 'CircuitOp'!";
+
+        // make sure function arguments match
+        CircuitOp circOp = cast<CircuitOp>(callable);
+        FunctionType circType = circOp.OpTrait::FunctionLike<CircuitOp>::getType();
+
+        // compare number of arguments
+        if (circType.getNumInputs() != this->args().size())
+            return this->emitOpError() << "has wrong number of circuit arguments! "
+                                          "Circuit requires: " << circType.getNumInputs() << ". "
+                                          "Got: " << this->args().size() << ".";
+        // compare number of results
+        if (circType.getNumResults() != this->results().size())
+            return this->emitOpError() << "has wrong number of circuit results! "
+                                          "Circuit requires: " << circType.getNumResults() << ". "
+                                          "Got: " << this->results().size() << ".";
+
+        // compare each parameter type:
+        //  - in general all types must match the circuit signature exactly, with 1 exception
+        //  - registers can appear in 2 forms in the circuit signature:
+        //      as !qs.rstate<n> or !qs.rstate<>, both of which can be matched with either, however
+        //      only in the case where both have size information will the given register be checked
+        //      to be at least as large as required, from which the first n qubits will be used
+        std::string errMsg = "detected wrong argument type! Expected: ";
+        auto sigType = circType.getInputs().begin();
+        for (auto argType : this->args().getTypes()) {
+            if (auto sigRegType = sigType->dyn_cast<RstateType>()) {
+                if (auto argRegType = argType.dyn_cast<RstateType>())
+                    if (argRegType.getNumQubits() && sigRegType.getNumQubits())
+                        if (*argRegType.getNumQubits() < *sigRegType.getNumQubits())
+                            return this->emitOpError() << "too few qubits in register! Expected: "
+                                                       << *sigRegType.getNumQubits() << ". Got: "
+                                                       << *argRegType.getNumQubits() << ".";
+                else
+                    return this->emitOpError() << errMsg << *sigType << ". Got: " << argType << ".";
+            } else {
+                if (*sigType != argType)
+                    return this->emitOpError() << errMsg << *sigType << ". Got: " << argType << ".";
+            }
+            sigType++;
+        }
+
+        // compare each return type to input types
+        auto retType = this->results().getTypes().begin();
+        for (auto argType : this->args().getTypes()) {
+            if (argType.isa<QstateType>() || argType.isa<RstateType>()) {
+                if (retType == this->results().getTypes().end())
+                    this->emitOpError() << "has too few return values! Every QData argument "
+                                           "needs to be returned in its updated state.";
+                if (*retType != argType)
+                    this->emitOpError() << "has mismatched return type! Requires: " << argType
+                                        << ". Got: " << *retType << ".";
+                retType++;
+            }
+        }
+
+        return success();
+    }];
+
+    let assemblyFormat = [{
+        $circref `(` $args `)` attr-dict `:` type($args) `->` type($results)
+    }];
+}
+
+def ApplyCircOp : QuantumSSA_Op<"apply"> {
+    let summary = "Apply quantum circuit to given arguments.";
+    let description = [{
+        In contrast to the call operation which uses a symbol to reference the
+        circuit, this operation calls a circuit via the provided SSA operand.
+        Typically, such a value is created to be manipulated via quantum meta
+        operations, and is ultimately applied to qubits via this op.
+
+        The circuit can be any value of type '!qs.circ' or a type derived from
+        it, such as '!qs.cop<n, !qs.circ>.
+
+        The remaining operands, which can be of any type, will be forwarded
+        to the circuit, and must match its declared arguments. It returns the
+        updated state for all qubits and registers given as input.
+
+        Example:
+
+        ```mlir
+        qs.circ @h(%r0: !qs.rstate<>) -> !qs.rstate<> {
+            %r1 = "qs.H"(%r0) : (!qs.rstate<>) -> !qs.rstate<>
+            "qs.return"(%r1) : (!qs.rstate<>) -> ()
+        }
+
+        %0 = "qs.allocreg"() {n=4} : () -> !qs.rstate<4>
+        %c = qs.getval @h -> !qs.circ<(!qs.rstate<>) -> !qs.rstate<>>
+
+        // Apply circuit with qubit register %0
+        %1 = "qs.apply"(%c, %0) : (!qs.rstate<4>) -> !qs.rstate<4>
+        // OR in custom assembly
+        %1 = qs.apply @h(%0) : !qs.rstate<4> -> !qs.rstate<4>
+        ```
+    }];
+
+    let arguments = (ins
+        QCirc_Type : $circval,
+        Variadic<AnyType> : $args
+    );
+
+    let results = (outs
+        Variadic<QData_Type> : $results
+    );
+
+    let verifier = [{
+        if (auto copType = this->circval().getType().dyn_cast<COpType>())
+            if (!copType.getBaseType() || !copType.getBaseType().isa<CircType>())
                 return this->emitOpError() << "can only be applied to circuit(-derived) types!";
 
         // make sure function arguments match
-        Operation *circValOp = this->callee().getDefiningOp();
-        while (!isa<FunCircOp>(circValOp)) {
+        Operation *circValOp = this->circval().getDefiningOp();
+        while (!isa<CircuitValueOp>(circValOp)) {
             if (auto cop = dyn_cast<ControlOp>(circValOp))
                 circValOp = cop.heldOp().getDefiningOp();
             else
                 circValOp = cast<AdjointOp>(circValOp).heldOp().getDefiningOp();
         }
-        Operation *circOp = cast<FunCircOp>(circValOp).resolveCallable();
-        FunctionType circType = circOp->getAttrOfType<TypeAttr>("type").getValue().dyn_cast<FunctionType>();
+        Operation *circOp = cast<CircuitValueOp>(circValOp).resolveCallable();
+        FunctionType circType = cast<CircuitOp>(circOp).OpTrait::FunctionLike<CircuitOp>::getType();
 
         auto funargTypes = circType.getInputs();
         auto funresTypes = circType.getResults();
 
         MLIRContext *ctx = getContext();
-        if (filterRegSize(funargTypes, ctx) != filterRegSize(this->operands().getType(), ctx))
-            return emitOpError("failed to verify that callee input types match argument types!");
+        if (filterRegSize(funargTypes, ctx) != filterRegSize(this->args().getType(), ctx))
+            return emitOpError("failed to verify that circuit input types match argument types!");
         if (filterRegSize(funresTypes, ctx) != filterRegSize(this->results().getType(), ctx))
-            return emitOpError("failed to verify that callee result types match result types!");
+            return emitOpError("failed to verify that circuit return types match result types!");
 
         return success();
     }];
@@ -465,7 +640,7 @@ def ApplyFunCircOp : QuantumSSA_Op<"applyfc"> {
     }];
 
     let assemblyFormat = [{
-        $callee `(` $operands `)` attr-dict `:` type(operands) `->` type(results)
+        $circval `(` $args `)` attr-dict `:` type($circval) `(` type($args) `->` type($results) `)`
     }];
 }
 
@@ -519,9 +694,9 @@ def ControlOp : QuantumSSA_Gate<"c", [Meta]> {
 
         auto heldOp = this->heldOp().getType();
         // make sure user is not trying to apply a circuit op by specifying a target
-        if (this->qbs() && (heldOp.isa<FunCircType>() || heldOp.isa<COpType>() &&
+        if (this->qbs() && (heldOp.isa<CircType>() || heldOp.isa<COpType>() &&
                             heldOp.cast<COpType>().getBaseType() &&
-                            heldOp.cast<COpType>().getBaseType().isa<FunCircType>()))
+                            heldOp.cast<COpType>().getBaseType().isa<CircType>()))
             return this->emitOpError() << "does not accept target qubits when controlling circuit!";
 
         // obtain total number of control qubits from input
@@ -616,8 +791,8 @@ def AdjointOp : QuantumSSA_Gate<"adj", [Meta]> {
             return this->emitOpError() << "given operation type must match output type!";
 
         // make sure user is not trying to apply a circuit op by specifying a target
-        if (this->qbs() && (heldOp.isa<FunCircType>() || heldOp.isa<COpType>() &&
-                            heldOp.cast<COpType>().getBaseType().isa<FunCircType>()))
+        if (this->qbs() && (heldOp.isa<CircType>() || heldOp.isa<COpType>() &&
+                            heldOp.cast<COpType>().getBaseType().isa<CircType>()))
             return this->emitOpError() << "does not accept target qubits when inverting circuit!";
     }];
 

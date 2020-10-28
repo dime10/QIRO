@@ -46,13 +46,13 @@ def Rstate_Type : QuantumSSA_Type<"RstateType", "(Qubit) Register state at a spe
 def U1_Type : QuantumSSA_Type<"U1Type", "U1 native gate type">;
 def U2_Type : QuantumSSA_Type<"U2Type", "U2 native gate type">;
 def ControlledOp_Type : QuantumSSA_Type<"COpType", "Quantum c-op type">;
-def FunctionCircuit_Type : QuantumSSA_Type<"FunCircType", "Function circuit type">;
+def Circuit_Type : QuantumSSA_Type<"CircType", "Quantum circuit type">;
 
 // Provide aggregate types that might be used in ops accepting multiple types
 def QData_Type : AnyTypeOf<[Qstate_Type, Rstate_Type]>;
 def QGate_Type : AnyTypeOf<[U1_Type, U2_Type]>;
-def QOp_Type : AnyTypeOf<[QGate_Type, ControlledOp_Type, FunctionCircuit_Type]>;
-def QCirc_Type : AnyTypeOf<[FunctionCircuit_Type, ControlledOp_Type]>;
+def QOp_Type : AnyTypeOf<[QGate_Type, ControlledOp_Type, Circuit_Type]>;
+def QCirc_Type : AnyTypeOf<[Circuit_Type, ControlledOp_Type]>;
 
 // Define new dialect traits
 def Unitary : NativeOpTrait<"UnitaryTrait">;

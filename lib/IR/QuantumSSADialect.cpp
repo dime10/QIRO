@@ -2,6 +2,8 @@
    e.g. operations, custom types, attributes etc. */
 
 #include "mlir/IR/DialectImplementation.h"
+#include "mlir/IR/OpDefinition.h"
+#include "mlir/IR/FunctionImplementation.h"
 #include "llvm/ADT/TypeSwitch.h"
 #include "llvm/ADT/StringSwitch.h"
 
@@ -23,7 +25,7 @@ void QuantumSSADialect::initialize() {
         #include "QuantumSSAOps.cpp.inc"
     >();
 
-    addTypes<QstateType, RstateType, U1Type, U2Type, COpType, FunCircType>();
+    addTypes<QstateType, RstateType, U1Type, U2Type, COpType, CircType>();
 }
 
 namespace mlir {
@@ -72,7 +74,7 @@ struct COpTypeStorage : public TypeStorage {
     COpTypeStorage(llvm::Optional<int> nctrl, Type baseType) {
         assert(!nctrl || *nctrl > 0 && "Number of controls must be > 0");
         if (baseType)
-            assert(baseType.isa<U1Type>() || baseType.isa<U2Type>() || baseType.isa<FunCircType>() &&
+            assert(baseType.isa<U1Type>() || baseType.isa<U2Type>() || baseType.isa<CircType>() &&
                    "Base type of controlled op can only be supported quantum operations!");
         this->nctrl = nctrl;
         this->baseType = baseType;
@@ -146,7 +148,7 @@ void QuantumSSADialect::printType(Type type, DialectAsmPrinter &printer) const {
                                                 if (auto numCtrls = t.getNumCtrls())
                                                     printer << *numCtrls << ", ";
                                                 printer << t.getBaseType() << ">"; })
-        .Case<FunCircType>([&](FunCircType)   { printer << "fcirc"; })
+        .Case<CircType>   ([&](CircType)      { printer << "circ"; })
         .Default([](Type) { llvm_unreachable("unrecognized type encountered in the printer!"); });
 }
 
@@ -170,7 +172,7 @@ Type QuantumSSADialect::parseType(DialectAsmParser &parser) const {
         .Case("u1",     [&] { return builder.getType<U1Type>(); })
         .Case("u2",     [&] { return builder.getType<U2Type>(); })
         .Case("cop",    [&] { return parseCOpType(parser); })
-        .Case("fcirc",  [&] { return builder.getType<FunCircType>(); })
+        .Case("circ",   [&] { return builder.getType<CircType>(); })
         .Default([&] { return EMIT_ERROR(parser, "unrecognized quantumssa type!"), nullptr; })();
 
     return result;
@@ -218,11 +220,92 @@ Type QuantumSSADialect::parseCOpType(DialectAsmParser &parser) {
     if (parser.parseGreater())
         return EMIT_ERROR(parser, errmsg), nullptr;
 
-    if (baseType && !(baseType.isa<U1Type>() || baseType.isa<U2Type>() || baseType.isa<FunCircType>()))
+    if (baseType && !(baseType.isa<U1Type>() || baseType.isa<U2Type>() || baseType.isa<CircType>()))
         return EMIT_ERROR(parser, "Base type of COp must be either 'u1', 'u2', or 'circ'!"),
                nullptr;
 
     return parser.getBuilder().getType<COpType>(optionalNctrl, baseType);
+}
+
+
+//===------------------------------------------------------------------------------------------===//
+// Custom assembly format for quantum operations
+//===------------------------------------------------------------------------------------------===//
+
+// custom printing for the function-like CircuitOp
+static void print(OpAsmPrinter &p, CircuitOp op) {
+    p << CircuitOp::getOperationName() << " ";
+    p.printSymbolName(op.getName());
+
+    FunctionType type = op.OpTrait::FunctionLike<CircuitOp>::getType();
+    impl::printFunctionSignature(p, op.getOperation(), type.getInputs(),
+                                 /*isVariadic=*/false, type.getResults());
+    impl::printFunctionAttributes(p, op.getOperation(), type.getNumInputs(), type.getNumResults());
+
+    p.printRegion(op.OpTrait::FunctionLike<CircuitOp>::getBody(),
+                  /*printEntryBlockArgs=*/false, /*printBlockTerminators=*/false);
+}
+
+// custom parsing for the function-like CircuitOp
+static ParseResult parseCircuitOp(OpAsmParser &p, OperationState &result) {
+    auto buildFuncType = [](Builder &builder, ArrayRef<Type> argTypes, ArrayRef<Type> results,
+                            impl::VariadicFlag, std::string &) {
+        return builder.getFunctionType(argTypes, results);
+    };
+
+    if (impl::parseFunctionLikeOp(p, result, /*allowVariadic=*/false, buildFuncType))
+        return failure();
+
+    return success();
+}
+
+
+//===------------------------------------------------------------------------------------------===//
+// Additional op method definitions
+//===------------------------------------------------------------------------------------------===//
+
+// Optional CircuitOp verification methods
+LogicalResult CircuitOp::verifyType() {
+    auto retType = this->getType().getResults().begin();
+    for (auto argType : this->getType().getInputs()) {
+        if (argType.isa<QstateType>() || argType.isa<RstateType>()) {
+            if (retType == this->getType().getResults().end())
+                this->emitOpError() << "has too few return values! Every QData argument "
+                                        "needs to be returned in its updated state.";
+            if (*retType != argType)
+                this->emitOpError() << "has mismatched return type! Requires: " << argType
+                                    << ". Got: " << *retType << ".";
+            retType++;
+        }
+    }
+
+    return success();
+}
+
+LogicalResult CircuitOp::verifyBody() {
+    Operation *term = this->gates().front().getTerminator();
+    if (cast<ReturnStateOp>(term).retvals().getType() != this->getType().getResults())
+        return this->emitOpError() << "must return updated state for all QData arguments!";
+
+    return success();
+};
+
+// The below methods are required for the CallableOpInterface
+Region *CircuitOp::getCallableRegion() {
+  return &this->getRegion();
+}
+
+ArrayRef<Type> CircuitOp::getCallableResults() {
+    return {};
+}
+
+// The below methods are required for the CallOpInterface
+CallInterfaceCallable CallCircOp::getCallableForCallee() {
+    return this->getAttrOfType<SymbolRefAttr>("circref");
+}
+
+OperandRange CallCircOp::getArgOperands() {
+    return this->args();
 }
 
 

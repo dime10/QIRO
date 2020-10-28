@@ -113,21 +113,52 @@ module {
 
 
     // create a small test circuit
-    %circ0 = "q.circ"() ({
-        q.H %0 : !q.qubit
-        q.CX %1, %0 : !q.qubit, !q.qubit
+    "q.circ"() ({
+    ^bb0(%t0: !q.qubit, %t1: !q.qubit):
+        q.H %t0 : !q.qubit
+        q.CX %t1, %t0 : !q.qubit, !q.qubit
         q.term
-    }) {name="test"} : () -> !q.circ
+    }) {sym_name = "test0", type = (!q.qubit, !q.qubit) -> ()} : () -> ()
 
-    %circ1 = q.circ("test") {
-        q.H %0 : !q.qubit
-        q.CX %1, %0 : !q.qubit, !q.qubit
-    } -> !q.circ
+    q.circ @test1(%t0: !q.qubit, %t1: !q.qubit) {
+        q.H %t0 : !q.qubit
+        q.CX %t1, %t0 : !q.qubit, !q.qubit
+    }
 
-    %circ2 = q.circ {
-        q.H %0 : !q.qubit
-        q.CX %1, %0 : !q.qubit, !q.qubit
-    } -> !q.circ
+    // test a parametrized circuit
+    q.circ @entangle(%n: index, %r: !q.qureg<>) {
+        q.H %r[0] : !q.qureg<>
+        affine.for %i = 1 to %n {
+            q.CX %r[0], %r[%i] : !q.qureg<>, !q.qureg<>
+        }
+    }
+
+    //q.circ @fail0(%q : !q.qubit) -> !q.qubit {
+    //    q.H %q : !q.qubit
+    //}
+
+
+    // create some circuit values
+    %circ0 = "q.getval"() {circref = @test0} : () -> !q.circ
+    %circ1 = q.getval @test1 -> !q.circ
+    //q.getval @fail1 -> !q.circ // symbol does not exist
+    //func @fail2(%i : index)
+    //q.getval @fail2 -> !q.circ // symbol does not reference a circuit
+
+
+    // test call to quantum circuit
+    "q.call"(%0, %1) {circref = @test0, operand_segment_sizes = dense<[2, 0]> : vector<2xi32>, static_ranges = [[], []], size_params = [-1, -1]} : (!q.qubit, !q.qubit) -> ()
+    q.call @test0(%0, %1) : !q.qubit, !q.qubit
+    //q.call @fail1(%0, %1) : !q.qubit, !q.qubit                  // symbol does not exist
+    //q.call @fail2(%a) : index                                   // symbol doesn't point to circuit
+    //q.call @test0(%0, %1, %2) : !q.qubit, !q.qubit, !q.qureg<4> // too many arguments
+    //q.call @test0(%0, %2) : !q.qubit, !q.qureg<4>               // arguments don't match signature
+    //q.call @test0(%0, %1[0]) : !q.qubit, !q.qubit               // only allowed on qureg
+
+    %c4 = constant 4 : index
+    q.call @entangle(4, %2) : !q.qureg<4>
+    q.call @entangle(%c4, %2) : index, !q.qureg<4>
+    q.call @entangle(2, %2[0,3]) : !q.qureg<4>
 
 
     // test register generation, commented lines trip the qubit/qureg invalidation verifiers
@@ -138,51 +169,8 @@ module {
     %14 = "q.genreg"(%10, %12) : (!q.qubit, !q.qureg<4>) -> !q.qureg<5>
     %15 =  q.genreg %11, %13 : !q.qubit, !q.qureg<4> -> !q.qureg<5>
     //q.genreg %0, %2, %1 : !q.qubit, !q.qureg<4>, !q.qubit -> !q.qureg<8> // qubit num mismatch
-    //q.genreg %1, %3 : !q.qubit, !q.qureg<4> -> !q.qureg<5>
-    //q.genreg %10, %3 : !q.qubit, !q.qureg<4> -> !q.qureg<5>
-    func @invalid(%q : !q.qubit, %r : !q.qureg<4>, %l1 : !q.qureg<>, %l2 : !q.qureg<>) -> !q.qureg<> {
-        q.genreg %q, %r : !q.qubit, !q.qureg<4> -> !q.qureg<5>
-        //q.X %q : !q.qubit
-        //q.H %r : !q.qureg<4>
-        //q.genlist %l1, %l2 : !q.qureg, !q.qureg -> !q.qureg
-        return %l1 : !q.qureg<>
-    }
-
-
-    // test a parametrized circuit
-    func @fun(%dummy : index, %qbs : !q.qureg<>) {
-        q.H %qbs : !q.qureg<>
-        q.term
-    }
-    func @fun2(%dummy : index, %qb : !q.qubit, %qbs : !q.qureg<>) {
-        q.RZ(0.1) %qb : !q.qubit
-        q.H %qbs : !q.qureg<>
-        q.term
-    }
-    func @fun3(%dummy : index, %qbs0 : !q.qureg<>, %qb : !q.qubit, %qbs1 : !q.qureg<>) {
-        q.term
-    }
-
-    %pc0 = "q.parcirc"(%2) {callee=@fun, n=4, operand_segment_sizes = dense<[1, 0]> : vector<2xi32>, static_ranges = []} : (!q.qureg<4>) -> !q.circ
-    %pc1 = q.parcirc @fun(4, %2) : !q.qureg<4> -> !q.circ
-    %pc2 = "q.parcirc"(%0, %2) {callee=@fun2, n=5, operand_segment_sizes = dense<[2, 0]> : vector<2xi32>, static_ranges = []} : (!q.qubit, !q.qureg<4>) -> !q.circ
-    %pc3 = q.parcirc @fun2(5, %0, %2) : !q.qubit, !q.qureg<4> -> !q.circ
-    //q.parcirc @fun3(4, %2) : !q.qureg<4> -> !q.circ               // function doesn't exist
-    //q.parcirc @fun(4, %0, %2) : !q.qubit, !q.qureg<4> -> !q.circ  // too many arguments to func
-    //q.parcirc @fun2(2, %2, %0) : !q.qureg<4>, !q.qubit -> !q.circ // arguments don't match sig
-    //q.parcirc @fun(5, %2) : !q.qureg<4> -> !q.circ                // less than 'n' qubits given
-    //func @fun4(%n : index) {q.term}
-    //q.parcirc @fun3(0,) -> !q.circ                                // circuits needs >= 1 qubit
-    //func @fun4(%q : !q.qubit, %p : !q.qubit) {q.term}
-    //q.parcirc @fun4(1, %0) : !q.qubit -> !q.circ                  // function needs size param
-
-    q.parcirc @fun(2, %2[2]) : !q.qureg<4> -> !q.circ
-    q.parcirc @fun(2, %2[%a,%b]) : !q.qureg<4> -> !q.circ
-    q.parcirc @fun(2, %2[1,%b,2]) : !q.qureg<4> -> !q.circ
-    q.parcirc @fun3(2, %2[1,%b,2], %0, %2[2]) : !q.qureg<4>, !q.qubit, !q.qureg<4> -> !q.circ
-    q.parcirc @fun3(2, %2, %0, %2) : !q.qureg<4>, !q.qubit, !q.qureg<4> -> !q.circ
-    //q.parcirc @fun3(2, %2, %0[2], %2) : !q.qureg<4>, !q.qubit, !q.qureg<4> -> !q.circ  // illegal on anything but qureg
-    //q.parcirc @fun3(2, %2, %0[%s], %2) : !q.qureg<4>, !q.qubit, !q.qureg<4> -> !q.circ //illegal on anything but qureg
+    //q.genreg %1, %3 : !q.qubit, !q.qureg<4> -> !q.qureg<5>   // %1 is used further below
+    //q.genreg %10, %3 : !q.qubit, !q.qureg<4> -> !q.qureg<5>  // %10 was used up above
 
 
     // test control meta operation, including on: ops, cops, and circs
@@ -242,12 +230,12 @@ module {
 
 
     // test circuit application
-    "q.apply"(%circ0) : (!q.circ) -> ()
-    q.apply %circ0 : !q.circ
-    "q.apply"(%ccirc0) : (!q.cop<1, !q.circ>) -> ()
-    q.apply %ccirc0 : !q.cop<1, !q.circ>
-    "q.apply"(%acirc0) : (!q.circ) -> ()
-    q.apply %acirc0 : !q.circ
+    "q.apply"(%circ0, %0, %1) {operand_segment_sizes=dense<[1, 2, 0]> : vector<3xi32>, static_ranges = [[], []], size_params = [-1, -1]} : (!q.circ, !q.qubit, !q.qubit) -> ()
+    q.apply %circ0(%0, %1) : !q.circ(!q.qubit, !q.qubit)
+    "q.apply"(%ccirc0, %0, %1) {operand_segment_sizes=dense<[1, 2, 0]> : vector<3xi32>, static_ranges = [[], []], size_params = [-1, -1]} : (!q.cop<1, !q.circ>, !q.qubit, !q.qubit) -> ()
+    q.apply %ccirc0(%0, %1) : !q.cop<1, !q.circ>(!q.qubit, !q.qubit)
+    "q.apply"(%acirc0, %0, %1) {operand_segment_sizes=dense<[1, 2, 0]> : vector<3xi32>, static_ranges = [[], []], size_params = [-1, -1]} : (!q.circ, !q.qubit, !q.qubit) -> ()
+    q.apply %acirc0(%0, %1) : !q.circ(!q.qubit, !q.qubit)
     //q.apply %op0 : !q.u1             // can only be applied to circuit(-derived) types
     //q.apply %cop0 : !q.cop<1, !q.u1> // can only be applied to circuit(-derived) types
 }

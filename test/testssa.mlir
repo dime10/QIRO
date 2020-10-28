@@ -35,21 +35,21 @@ module {
     %r0_4 = qs.adj %h, %r0_3 : !qs.u1, !qs.rstate<4> -> !qs.rstate<4>
 
     // test new return statement
-    func @retTest(%arg : !qs.qstate) -> !qs.qstate {
+    qs.circ @retTest(%arg : !qs.qstate) -> !qs.qstate {
         qs.return %arg : !qs.qstate
     }
 
     // test new function circuit type
-    %circ = qs.funcirc @retTest -> !qs.fcirc
+    %circ = qs.getval @retTest -> !qs.circ
 
     // apply meta op the function circuit
-    %ccirc = qs.c %circ, %q0_0 : !qs.fcirc, !qs.qstate -> !qs.cop<1, !qs.fcirc>
-    %acirc = qs.adj %circ : !qs.fcirc -> !qs.fcirc
+    %ccirc = qs.c %circ, %q0_0 : !qs.circ, !qs.qstate -> !qs.cop<1, !qs.circ>
+    %acirc = qs.adj %circ : !qs.circ -> !qs.circ
 
     // execute the function circuits
-    %q0_10 = call @retTest(%q0_9) : (!qs.qstate) -> !qs.qstate
-    //%q0_14 = qs.applyfc %ch(%q0_13) : !qs.cop<1, !qs.u1>> // only works on fcirc(-derived) types
-    %q0_11 = qs.applyfc %circ(%q0_10) : !qs.fcirc, !qs.qstate -> !qs.qstate
-    %q0_12 = qs.applyfc %ccirc(%q0_11) : !qs.cop<1, !qs.fcirc>, !qs.qstate -> !qs.qstate
-    %q0_13 = qs.applyfc %acirc(%q0_12) : !qs.fcirc, !qs.qstate -> !qs.qstate
+    %q0_10 = qs.call @retTest(%q0_9) : !qs.qstate -> !qs.qstate
+    %q0_11 = qs.apply %circ(%q0_10) : !qs.circ(!qs.qstate -> !qs.qstate)
+    %q0_12 = qs.apply %ccirc(%q0_11) : !qs.cop<1, !qs.circ>(!qs.qstate -> !qs.qstate)
+    %q0_13 = qs.apply %acirc(%q0_12) : !qs.circ(!qs.qstate -> !qs.qstate)
+    //%q0_14 = qs.apply %ch(%q0_13) : !qs.cop<1, !qs.u1>>(!qs.qstate) // only works on circ types
 }

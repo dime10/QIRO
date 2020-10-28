@@ -58,7 +58,7 @@ private:
     value_map localStateMap;
     // temporary storage for newly created functions
     Operation *newfn;
-    // storage for operands of parcirc ops since these need to be move to the call site (applyfc)
+    // storage for operands of circuit ops, since these need to be moved to the call site (apply...)
     std::unordered_map<Value, llvm::SmallVector<Value, 4>> circArgMap;
     // circuit counter to generate unique names
     unsigned numCirc;
@@ -227,7 +227,7 @@ public:
                 op->erase();
 
             } else if (isa<FuncOp>(op)) {
-                FuncOp fn = cast<FuncOp>(op);
+                /*FuncOp fn = cast<FuncOp>(op);
 
                 // generate new function argument and return type, replace qubit -> state
                 std::vector<Type> inputTypes = fn.getType().getInputs().vec();
@@ -250,10 +250,10 @@ public:
                 for (unsigned i = 0; i < cast<FuncOp>(op).getNumArguments(); i++) {
                     if (isQData(fn.getArgument(i).getType()))
                         qbmap[fn.getArgument(i)] = cast<FuncOp>(newOp).getArgument(i);
-                }
+                }*/
 
             } else if (isa<quantum::TerminatorOp>(op)) {
-                SmallVector<Value, 4> states;
+                /*SmallVector<Value, 4> states;
                 states.reserve(qbmap.size());
                 for (auto &pair : qbmap)
                     states.push_back(pair.second);
@@ -262,10 +262,10 @@ public:
                 ReturnStateOp::build(opBuilder, opState, ValueRange(states));
                 newOp = opBuilder.createOperation(opState);
 
-                op->erase();
+                op->erase();*/
 
             } else if (isa<CallOp>(op)) {
-                CallOp call = cast<CallOp>(op);
+               /* CallOp call = cast<CallOp>(op);
                 FlatSymbolRefAttr callee = call.calleeAttr();
                 FunctionType calleeType = call.getCalleeType();
                 SmallVector<Value, 4> operands;
@@ -286,10 +286,10 @@ public:
                     if (isQData(op->getOperand(i).getType()))
                         qbmap[op->getOperand(i)] = newOp->getResult(j++);
                 }
-                op->erase();
+                op->erase();*/
 
             } else if (isa<quantum::CircuitOp>(op)) {
-                quantum::CircuitOp circOp = cast<quantum::CircuitOp>(op);
+                /*quantum::CircuitOp circOp = cast<quantum::CircuitOp>(op);
                 // collect all external ssa values to generate equivalent function in second step
                 std::unordered_set<Value> uniqueValues;
                 for (auto &childOp : circOp.getOps()) {
@@ -337,28 +337,28 @@ public:
 
                 // add the external operands to the circuit argument cache
                 circArgMap[newOp->getResult(0)] = externalOperands;
-                op->replaceAllUsesWith(newOp);
+                op->replaceAllUsesWith(newOp);*/
 
-            } else if (isa<quantum::ParametricCircuitOp>(op)) {
-                quantum::ParametricCircuitOp parCircOp = cast<quantum::ParametricCircuitOp>(op);
+            } else if (false/*parametric circuit op*/) {
+                /*quantum::ParametricCircuitOp parCircOp = cast<quantum::ParametricCircuitOp>(op);
                 FuncOp fun = dyn_cast<FuncOp>(parCircOp.resolveCallable());
                 FunCircType retType = opBuilder.getType<FunCircType>();
 
-                opState = OperationState(op->getLoc(), FunCircOp::getOperationName());
-                FunCircOp::build(opBuilder, opState, retType, fun.getName(), parCircOp.nAttr());
+                opState = OperationState(op->getLoc(), CircuitOp::getOperationName());
+                CircuitOp::build(opBuilder, opState, retType, fun.getName(), parCircOp.nAttr());
                 newOp = opBuilder.createOperation(opState);
 
                 circArgMap[newOp->getResult(0)] = op->getOperands();
                 op->replaceAllUsesWith(newOp);
-                op->erase();
+                op->erase();*/
 
             } else if (isa<quantum::ApplyCircOp>(op)) {
-                quantum::ApplyCircOp applyOp = cast<quantum::ApplyCircOp>(op);
-                Operation *circDef = applyOp.circ().getDefiningOp();
-                while (!isa<FunCircOp>(circDef))
+                /*quantum::ApplyCircOp applyOp = cast<quantum::ApplyCircOp>(op);
+                Operation *circDef = applyOp.circval().getDefiningOp();
+                while (!isa<CircuitOp>(circDef))
                     circDef = circDef->getOperand(0).getDefiningOp(); // contractualize heldOp at 0
-                FunCircOp fcirc = cast<FunCircOp>(circDef);
-                SmallVector<Value, 4> oldOperands = circArgMap[fcirc.funcirc()];
+                CircuitOp fcirc = cast<CircuitOp>(circDef);
+                SmallVector<Value, 4> oldOperands = circArgMap[fcirc.circval()];
                 SmallVector<Value, 4> newOperands;
 
                 if (fcirc.n()) {
@@ -386,7 +386,7 @@ public:
                     if (isQData(oldOperands[i].getType()))
                         qbmap[oldOperands[i]] = newOp->getResult(j++);
                 }
-                op->erase();
+                op->erase();*/
             }
 
             if (newOp) {
@@ -439,13 +439,8 @@ public:
         });
     }
 };
-} // end namespace
 
-// Register passes defined in this file to make them accessible to utilities like quantum-opt.
-static PassRegistration<MemToValPass> memValPass(
-    "convert-mem-to-val",
-    "Changes op mode from memory to value semantics, by module."
-);
+} // end namespace
 
 // Pass creation functions declared in Passes.h
 std::unique_ptr<Pass> quantum::createMemToValPass() {

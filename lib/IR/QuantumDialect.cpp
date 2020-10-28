@@ -3,6 +3,8 @@
 
 #include "mlir/IR/DialectImplementation.h"
 #include "mlir/IR/AsmState.h"
+#include "mlir/IR/OpDefinition.h"
+#include "mlir/IR/FunctionImplementation.h"
 #include "llvm/ADT/TypeSwitch.h"
 #include "llvm/ADT/StringSwitch.h"
 
@@ -232,14 +234,52 @@ Type QuantumDialect::parseCOpType(DialectAsmParser &parser) {
 
 
 //===------------------------------------------------------------------------------------------===//
+// Custom parsing for special operations types printing and parsing
+//===------------------------------------------------------------------------------------------===//
+
+// custom printing for the function-like CircuitOp
+static void print(OpAsmPrinter &p, CircuitOp op) {
+    p << CircuitOp::getOperationName() << " ";
+    p.printSymbolName(op.getName());
+
+    FunctionType type = op.OpTrait::FunctionLike<CircuitOp>::getType();
+    impl::printFunctionSignature(p, op.getOperation(), type.getInputs(),
+                                 /*isVariadic=*/false, type.getResults());
+    impl::printFunctionAttributes(p, op.getOperation(), type.getNumInputs(), type.getNumResults());
+
+    p.printRegion(op.OpTrait::FunctionLike<CircuitOp>::getBody(),
+                  /*printEntryBlockArgs=*/false, /*printBlockTerminators=*/false);
+}
+
+// custom parsing for the function-like CircuitOp
+static ParseResult parseCircuitOp(OpAsmParser &p, OperationState &result) {
+    auto buildFuncType = [](Builder &builder, ArrayRef<Type> argTypes, ArrayRef<Type> results,
+                            impl::VariadicFlag, std::string &) {
+        return builder.getFunctionType(argTypes, results);
+    };
+
+    if (impl::parseFunctionLikeOp(p, result, /*allowVariadic=*/false, buildFuncType))
+        return failure();
+
+    for (auto &region : result.regions)
+        OpTrait::SingleBlockImplicitTerminator<TerminatorOp>::Impl<CircuitOp>::
+            ensureTerminator(*region, p.getBuilder(), result.location);
+
+    return success();
+}
+
+
+//===------------------------------------------------------------------------------------------===//
 // Static parse helper methods for the register access interface
 //===------------------------------------------------------------------------------------------===//
 
 // Parse a list of register range indeces (accessors) that can be either SSA values of type Index
 // or some constant integer attribute.
-static ParseResult parseOperandOrIntAttrList(OpAsmParser &parser, OperationState &result,
-        Builder &builder, ArrayAttr &accessors, int64_t dynVal,
-        SmallVectorImpl<OpAsmParser::OperandType> &ssa) {
+static ParseResult parseOperandOrIntAttrList(OpAsmParser &parser, ArrayAttr &accessors,
+        int64_t dynVal, SmallVectorImpl<OpAsmParser::OperandType> &ssa) {
+
+    Builder builder = parser.getBuilder();
+
     if (failed(parser.parseOptionalLSquare())) {
         accessors = builder.getI64ArrayAttr({});
         return success();
@@ -303,8 +343,8 @@ static ParseResult parseOperandListWithAccessors(OpAsmParser &parser, OperationS
             if (isRegLike[parsed]) {
                 SmallVector<OpAsmParser::OperandType, 3> ssaAccessors;
                 ArrayAttr staticAccessors;
-                if (parseOperandOrIntAttrList(parser, result, b, staticAccessors,
-                                              ShapedType::kDynamicSize, ssaAccessors))
+                if (parseOperandOrIntAttrList(parser, staticAccessors, ShapedType::kDynamicSize,
+                                              ssaAccessors))
                     return failure();
                 // populates the static range attribute array
                 result.addAttribute(OpClass::getAccessorAttrName(currRegLike++), staticAccessors);
@@ -325,38 +365,44 @@ static ParseResult parseOperandListWithAccessors(OpAsmParser &parser, OperationS
 }
 
 // This is a variation of the 'parseOperandListWithAccessors' function which parses a mixed list
-// of operands of which some have register accessors (and one of which could be optional).
-// In contrast, this function only parses two operands, but both of which are variadic:
-// a number of QData values, as well as accompanying accessors.
-static ParseResult parseVariadicOperandWithAccessors(OpAsmParser &parser, OperationState &result,
-        SmallVectorImpl<OpAsmParser::OperandType> &varOperands,
-        SmallVectorImpl<OpAsmParser::OperandType> &varAccessors,
-        SmallVectorImpl<Attribute> &allStaticAccessors, int &parsedOperands, int &parsedAccessors) {
-    Builder b = parser.getBuilder();
+// of operands (args) of which some have register accessors (ranges, staticRangesVec).
+// Additionally, it can also parse integer constants (sizeParamsVec) interspersed between the
+// operands.
+static ParseResult parseMixedOperandsAccessorsConstants(OpAsmParser &p,
+        SmallVectorImpl<OpAsmParser::OperandType> &args,
+        SmallVectorImpl<OpAsmParser::OperandType> &ranges,
+        SmallVectorImpl<Attribute> &staticRangesVec,
+        SmallVectorImpl<Attribute> &sizeParamsVec,
+        int &parsedOperands, int &parsedAccessors) {
+
+    Builder b = p.getBuilder();
 
     parsedOperands = parsedAccessors = 0;
     do {
         OpAsmParser::OperandType currentOperand;
-        auto res = parser.parseOptionalOperand(currentOperand);
+        auto res = p.parseOptionalOperand(currentOperand);
         if (res.hasValue()){
-            if (failed(*res))
+            if (failed(res.getValue()))
                 return failure();
 
-            varOperands.push_back(currentOperand);
+            args.push_back(currentOperand);
             parsedOperands++;
 
             SmallVector<OpAsmParser::OperandType, 3> ssaAccessors;
             ArrayAttr staticAccessors;
-            if (parseOperandOrIntAttrList(parser, result, b, staticAccessors,
-                                          ShapedType::kDynamicSize, ssaAccessors))
+            if (parseOperandOrIntAttrList(p, staticAccessors, ShapedType::kDynamicSize, ssaAccessors))
                 return failure();
-            varAccessors.append(ssaAccessors.begin(), ssaAccessors.end());
-            allStaticAccessors.push_back(staticAccessors);
+            ranges.append(ssaAccessors.begin(), ssaAccessors.end());
+            staticRangesVec.push_back(staticAccessors);
             parsedAccessors += ssaAccessors.size();
+            sizeParamsVec.push_back(b.getI64IntegerAttr(-1));
         } else {
-            break;
+            IntegerAttr sizeParam;
+            if (p.parseAttribute<IntegerAttr>(sizeParam))
+                return failure();
+            sizeParamsVec.push_back(sizeParam);
         }
-    } while (succeeded(parser.parseOptionalComma()));
+    } while (succeeded(p.parseOptionalComma()));
 
     return success();
 }
@@ -438,53 +484,7 @@ template<typename OpClass> static void print(OpAsmPrinter &p, OpClass op) {
     }
 
     // print all result types
-    p.printOptionalArrowTypeList(op.getResultTypes());
-}
-
-// print function for the parametric circuit op
-static void print(OpAsmPrinter &p, ParametricCircuitOp op) {
-    SmallVector<StringRef, 3> elidedAttrs;
-    ArrayAttr array = op.getAttrOfType<ArrayAttr>(op.getAccessorAttrName(0));
-    p << op.getOperationName() << " ";
-
-    p.printAttributeWithoutType(op.calleeAttr());
-    p << "(";
-    p.printAttributeWithoutType(op.nAttr());
-
-    for (unsigned argIdx = 0, rangeIdx = 0; argIdx < op.qbs().size(); argIdx++) {
-        p << ", ";
-        p.printOperand(op.qbs()[argIdx]);
-        if (array.size()) {
-            ArrayAttr subArray = array[argIdx].dyn_cast<ArrayAttr>();
-            if (subArray.size())
-                p << "[";
-            const char *sep = "";
-            for (auto attr : subArray) {
-                p << sep;
-                if (attr.dyn_cast<IntegerAttr>().getInt() == -1)
-                    p.printOperand(op.ranges()[rangeIdx++]);
-                else
-                    p.printAttributeWithoutType(attr);
-                sep = ", ";
-            }
-            if (subArray.size())
-                p << "]";
-        }
-    }
-
-    p << ")";
-
-    elidedAttrs.push_back(op.getOperandSegmentSizeAttr());
-    elidedAttrs.push_back(op.getAccessorAttrName(0));
-    elidedAttrs.push_back("callee");
-    elidedAttrs.push_back("n");
-    p.printOptionalAttrDict(op.getAttrs(), /*elidedAttrs=*/elidedAttrs);
-
-    p << " : ";
-    llvm::interleaveComma(op.qbs().getTypes(), p);
-
-    p << " -> ";
-    p.printType(op.getResult().getType());
+    p.printOptionalArrowTypeList(op.getOperation()->getResultTypes());
 }
 
 // This parse function can be used with all quantum ops that implement the RegAccessInterface.
@@ -564,91 +564,102 @@ static ParseResult parseRegAccessOps(OpAsmParser &p, OperationState &result) {
     return success();
 }
 
-// custom parsing for the ParametricCircuitOp
-static ParseResult parseParametricCircuitOp(OpAsmParser &p, OperationState &result) {
-    SmallVector<OpAsmParser::OperandType, 9> allOperands;
-    SmallVector<Type, 9> allOperandTypes;
-    SmallVector<Type, 1> allReturnTypes;
-    SmallVector<Attribute, 3> accessorArray;
-    int parsedOperands, parsedAccessors;
+// custom directive to print the ApplyCircOp
+static void printApplyArgs(OpAsmPrinter &p, OperandRange args, OperandRange ranges,
+                           TypeRange rangeTypes, ArrayAttr staticRanges,
+                           ArrayAttr sizeParams) {
+    const char *sep = "";
+    for (int argIdx = 0, rangeIdx = 0, sizeIdx = 0; argIdx < args.size(); argIdx++) {
+        p << sep;
+
+        if (sizeParams.size() && sizeParams[sizeIdx].cast<IntegerAttr>().getInt() != -1) {
+            p.printAttributeWithoutType(sizeParams[sizeIdx++]);
+            continue;
+        }
+
+        sizeIdx++;
+        p.printOperand(args[argIdx]);
+
+        if (args[argIdx].getType().isa<QuregType>()) {
+            if (staticRanges.size()) {
+                ArrayAttr subArray = staticRanges[argIdx].dyn_cast<ArrayAttr>();
+                if (subArray.size())
+                    p << "[";
+                const char *sep = "";
+                for (auto attr : subArray) {
+                    p << sep;
+                    if (attr.dyn_cast<IntegerAttr>().getInt() == -1)
+                        p.printOperand(ranges[rangeIdx++]);
+                    else
+                        p.printAttributeWithoutType(attr);
+                    sep = ", ";
+                }
+                if (subArray.size())
+                    p << "]";
+            }
+        }
+
+        sep = ", ";
+    }
+}
+
+// custom directive for parsing the AppyCircOp
+static ParseResult parseApplyArgs(OpAsmParser &p, SmallVectorImpl<OpAsmParser::OperandType> &args,
+                                  SmallVectorImpl<OpAsmParser::OperandType> &ranges,
+                                  SmallVectorImpl<Type> &rangeTypes, ArrayAttr &staticRanges,
+                                  ArrayAttr &sizeParams) {
     Builder b = p.getBuilder();
-
-    FlatSymbolRefAttr calleeAttr;
-    if (p.parseAttribute<FlatSymbolRefAttr>(calleeAttr, "callee", result.attributes))
-        return failure();
-    if (p.parseLParen())
-        return failure();
-
-    IntegerAttr nAttr;
-    if (p.parseAttribute(nAttr, "n", result.attributes))
-        return failure();
-    if (p.parseComma())
-        return failure();
+    SmallVector<Attribute, 3> staticRangesVec;
+    SmallVector<Attribute, 3> sizeParamsVec;
+    int parsedOperands, parsedAccessors;
 
     // Since the variadic QData operands must come before any accessor operands, they can already
     // be loaded onto the final list (allOperands), the accessors will then be appended at the end.
     // The accessor array is populated inside the function call, which must then be added to the op.
-    llvm::SMLoc allOperandLoc = p.getCurrentLocation();
-    SmallVector<OpAsmParser::OperandType, 6> accessorOperands;
-    if (parseVariadicOperandWithAccessors(p, result, allOperands, accessorOperands, accessorArray,
-                                          parsedOperands, parsedAccessors))
+    if (parseMixedOperandsAccessorsConstants(p, args, ranges, staticRangesVec, sizeParamsVec,
+                                             parsedOperands, parsedAccessors))
         return failure();
 
-    // now append the parsed accessor operands to the end of the list
-    allOperands.append(accessorOperands.begin(), accessorOperands.end());
-    // fill the static accessor array attributes for non-parsed operands with empty arrays
-    result.addAttribute(ParametricCircuitOp::getAccessorAttrName(0), b.getArrayAttr(accessorArray));
-    // add the segment sizes of the variadic operands
-    result.addAttribute(ParametricCircuitOp::getOperandSegmentSizeAttr(),
-                        b.getI32VectorAttr({parsedOperands, parsedAccessors}));
+    // add the parsed static accessor indices appropriate attribute
+    staticRanges = b.getArrayAttr(staticRangesVec);
+    // add the parsed integer constant to the appropriate attribute
+    sizeParams = b.getArrayAttr(sizeParamsVec);
 
-    if (p.parseRParen())
-        return failure();
-
-    if (p.parseOptionalAttrDict(result.attributes))
-        return failure();
-
-    llvm::SMLoc loc = p.getCurrentLocation();
-    if (succeeded(p.parseOptionalColon()) && p.parseTypeList(allOperandTypes))
-        return failure();
-
-    if (parsedOperands != allOperandTypes.size())
-        return p.emitError(loc, "number of provided operand types "
-                                "(" + std::to_string(allOperandTypes.size()) + ")"
-                                " doesn't match expected "
-                                "(" + std::to_string(parsedOperands) + ")");
-
-    for (int i = 0; i < parsedAccessors; i++) {
-        allOperandTypes.push_back(b.getIndexType());
-    }
-
-    if (p.resolveOperands(allOperands, allOperandTypes, allOperandLoc, result.operands))
-        return failure();
-
-    // parse optional return type
-    if (succeeded(p.parseOptionalArrow())) {
-        if (p.parseTypeList(allReturnTypes))
-            return failure();
-        result.addTypes(allReturnTypes);
-    }
+    // fill in the types of the dynamic accessor indices
+    rangeTypes.reserve(ranges.size());
+    for (int i = 0; i < ranges.size(); i++)
+        rangeTypes.push_back(b.getIndexType());
 
     return success();
 }
 
 
 //===------------------------------------------------------------------------------------------===//
-// Additional implementations of OpInterface methods
+// Additional op method definitions
 //===------------------------------------------------------------------------------------------===//
 
-// Return the callee, required by the call interface.
-CallInterfaceCallable ParametricCircuitOp::getCallableForCallee() {
-    return getAttrOfType<SymbolRefAttr>("callee");
+// The below methods are required for the CallableOpInterface
+Region *CircuitOp::getCallableRegion() {
+  return &this->getRegion();
 }
 
-// Get the arguments to the called function, required by the call interface.
-Operation::operand_range ParametricCircuitOp::getArgOperands() {
-    return qbs();
+ArrayRef<Type> CircuitOp::getCallableResults() {
+    return {};
 }
+
+// The below methods are required for the CallOpInterface
+CallInterfaceCallable CallCircOp::getCallableForCallee() {
+    return this->getAttrOfType<SymbolRefAttr>("circref");
+}
+
+OperandRange CallCircOp::getArgOperands() {
+    return this->args();
+}
+
+
+//===------------------------------------------------------------------------------------------===//
+// Auto-generated op & interface definitions
+//===------------------------------------------------------------------------------------------===//
 
 #define GET_INTERFACE_CLASSES
 #include "QuantumInterfaces.cpp.inc"
