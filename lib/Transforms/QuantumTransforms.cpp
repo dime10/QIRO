@@ -87,10 +87,12 @@ private:
 
     static Type convDialectType(Type inType, Builder &builder, const Value &operand = nullptr) {
         Type outType;
-        if (inType.isa<quantum::OpType>()) {
-            outType = builder.getType<OpType>();
+        if (inType.isa<quantum::U1Type>()) {
+            outType = builder.getType<U1Type>();
+        } else if (inType.isa<quantum::U2Type>()) {
+            outType = builder.getType<U2Type>();
         } else if (auto copType = inType.dyn_cast<quantum::COpType>()) {
-            unsigned n = copType.getNumCtrls();
+            llvm::Optional<int> n = copType.getNumCtrls();
             Type baseType = copType.getBaseType();
             baseType = baseType ? convDialectType(baseType, builder, operand) : baseType;
             outType = builder.getType<COpType>(n, baseType);
@@ -328,7 +330,7 @@ public:
                 }
 
                 // create the function circuit op
-                FunCircType retType = opBuilder.getType<FunCircType>(cast<FuncOp>(newfn).getType());
+                FunCircType retType = opBuilder.getType<FunCircType>();
                 opState = OperationState(op->getLoc(), FunCircOp::getOperationName());
                 FunCircOp::build(opBuilder, opState, retType, name, nullptr);
                 newOp = opBuilder.createOperation(opState);
@@ -340,7 +342,7 @@ public:
             } else if (isa<quantum::ParametricCircuitOp>(op)) {
                 quantum::ParametricCircuitOp parCircOp = cast<quantum::ParametricCircuitOp>(op);
                 FuncOp fun = dyn_cast<FuncOp>(parCircOp.resolveCallable());
-                FunCircType retType = opBuilder.getType<FunCircType>(fun.getType());
+                FunCircType retType = opBuilder.getType<FunCircType>();
 
                 opState = OperationState(op->getLoc(), FunCircOp::getOperationName());
                 FunCircOp::build(opBuilder, opState, retType, fun.getName(), parCircOp.nAttr());
@@ -374,8 +376,8 @@ public:
                         newOperands.push_back(arg);
                 }
 
-                FunCircType fcircOp = fcirc.getType().cast<FunCircType>();
-                ArrayRef<Type> retTypes = fcircOp.getFunType().getResults();
+                TypeAttr fcircTypeAttr = fcirc.resolveCallable()->getAttrOfType<TypeAttr>("type");
+                ArrayRef<Type> retTypes = fcircTypeAttr.getValue().dyn_cast<FunctionType>();
                 opState = OperationState(op->getLoc(), ApplyFunCircOp::getOperationName());
                 ApplyFunCircOp::build(opBuilder, opState, retTypes, applyOp.circ(), newOperands);
                 newOp = opBuilder.createOperation(opState);

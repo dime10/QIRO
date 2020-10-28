@@ -10,8 +10,9 @@ class QuantumSSA_Gate<string mnemonic, list<OpTrait> traits = []> : QuantumSSA_O
         immediate application to specific qubits. That means that the target qubits
         need not necessarily be supplied (signifying the op is on hold) and need to
         be tagged 'optional' in ODS, with a fixed name (used by the verifier): "qbs".
-        Similarly, the output of type !qs.op will only be generated for an op on hold,
-        and thus needs to be tagged 'optional' as well, with the fixed name: "op".
+        Similarly, the output, which has as type any of the quantum op types, will
+        only be generated for an op on hold, and thus needs to be tagged 'optional'
+        as well, with the fixed name: "op".
         Note that the verifier will check that only one of the two is given/returned.
     }];
 
@@ -20,7 +21,8 @@ class QuantumSSA_Gate<string mnemonic, list<OpTrait> traits = []> : QuantumSSA_O
         if (this->qbs()) {
             if(this->qbs().getType() != this->res().getType())
                 return this->emitOpError() << "requires same type for input and return state!";
-        } else if (!this->res().getType().isa<OpType>() &&
+        } else if (!this->res().getType().isa<U1Type>() &&
+                   !this->res().getType().isa<U2Type>() &&
                    !this->res().getType().isa<COpType>() &&
                    !this->res().getType().isa<FunCircType>()) {
             return this->emitOpError() << "must return itself when no target given!";
@@ -131,9 +133,9 @@ def HOp : QuantumSSA_Gate<"H", [Unitary, Hermitian]> {
         // OR in custom assembly format
         qs.H %1 : !qs.rstate<4>
         // Generate Hadamard op without application to qubits (to be manipulated via meta-ops)
-        $op = "qs.H"() : () -> !qs.op
+        $op = "qs.H"() : () -> !qs.u1
         // OR in custom assembly format
-        %op = qs.H -> !qs.op
+        %op = qs.H -> !qs.u1
         ```
     }];
 
@@ -142,7 +144,7 @@ def HOp : QuantumSSA_Gate<"H", [Unitary, Hermitian]> {
     );
 
     let results = (outs
-        QDataOrOp_Type : $res
+        AnyTypeOf<[QData_Type, U1_Type]> : $res
     );
 
     let assemblyFormat = [{
@@ -175,9 +177,9 @@ def XOp : QuantumSSA_Gate<"X", [Unitary, Hermitian]> {
         // OR in custom assembly format
         qs.X %1 : !qs.rstate<4>
         // Generate NOT op without application to qubits (to be manipulated via meta-ops)
-        $op = "qs.X"() : () -> !qs.op
+        $op = "qs.X"() : () -> !qs.u1
         // OR in custom assembly format
-        %op = qs.X -> !qs.op
+        %op = qs.X -> !qs.u1
         ```
     }];
 
@@ -186,7 +188,7 @@ def XOp : QuantumSSA_Gate<"X", [Unitary, Hermitian]> {
     );
 
     let results = (outs
-        QDataOrOp_Type : $res
+        AnyTypeOf<[QData_Type, U1_Type]> : $res
     );
 
     let assemblyFormat = [{
@@ -220,9 +222,9 @@ def RzOp : QuantumSSA_Gate<"RZ", [Unitary]> {
         // OR in custom assembly format
         qs.RZ(0.1) %1 : !qs.rstate<4>
         // Generate RZ gate without application to qubits (to be manipulated via meta-ops)
-        $op = "qs.RZ"() {phi=0.1} : () -> !qs.op
+        $op = "qs.RZ"() {phi=0.1} : () -> !qs.u1
         // OR in custom assembly format
-        %op = qs.RZ(0.1) -> !qs.op
+        %op = qs.RZ(0.1) -> !qs.u1
         ```
     }];
 
@@ -232,7 +234,7 @@ def RzOp : QuantumSSA_Gate<"RZ", [Unitary]> {
     );
 
     let results = (outs
-        QDataOrOp_Type : $res
+        AnyTypeOf<[QData_Type, U1_Type]> : $res
     );
 
     let assemblyFormat = [{
@@ -260,7 +262,7 @@ def ROp : QuantumSSA_Gate<"R", [Unitary]> {
     );
 
     let results = (outs
-        QDataOrOp_Type : $res
+        AnyTypeOf<[QData_Type, U1_Type]> : $res
     );
 
     let assemblyFormat = [{
@@ -298,9 +300,9 @@ def CNotOp : QuantumSSA_Gate<"CX", [Unitary, Hermitian]> {
         // OR in custom assembly format
         qs.CX %0, %2 : !qs.qstate, !qs.rstate<4>
         // Generate CNOT gate without application to qubits (to be manipulated via meta-ops)
-        $op = "qs.CX"(%0) : (!qs.qstate) -> !qs.cop<1>
+        $op = "qs.CX"(%0) : (!qs.qstate) -> !qs.u2
         // OR in custom assembly format
-        $op = qs.CX %0 : !qs.qstate -> !qs.cop<1>
+        $op = qs.CX %0 : !qs.qstate -> !qs.u2
         ```
     }];
 
@@ -310,7 +312,7 @@ def CNotOp : QuantumSSA_Gate<"CX", [Unitary, Hermitian]> {
     );
 
     let results = (outs
-        QDataOrCOp_Type : $res
+        AnyTypeOf<[QData_Type, U2_Type]> : $res
     );
 
     let additionalVerifier = [{
@@ -361,9 +363,9 @@ def FunCircOp : QuantumSSA_Op<"funcirc"> {
         func @test(%qb : !qs.state) -> !qs.state {
             qs.return %qb : !qs.state
         }
-        %circ = "qs.funcirc"() {"fun"=@test} : () -> !qs.fcirc<(!qs.state) -> !qs.state>
+        %circ = "qs.funcirc"() {"fun"=@test} : () -> !qs.fcirc
         // OR in custom assembly form
-        %circ = qs.funcirc @test -> !qs.fcirc<(!qs.state) -> !qs.state>
+        %circ = qs.funcirc @test -> !qs.fcirc
         ```
     }];
 
@@ -381,12 +383,6 @@ def FunCircOp : QuantumSSA_Op<"funcirc"> {
         auto funptr = this->resolveCallable();
         if (!funptr)
             return this->emitOpError() << "cannot resolve given function!";
-
-        // make sure function arguments match
-        auto retType = this->funcirc().getType().dyn_cast<FunCircType>();
-        auto funtype = funptr->getAttrOfType<TypeAttr>("type").getValue().dyn_cast<FunctionType>();
-        if (funtype != retType.getFunType())
-            this->emitOpError() << "must return 'fcirc' type that matches given function type!";
 
         return success();
     }];
@@ -426,15 +422,23 @@ def ApplyFunCircOp : QuantumSSA_Op<"applyfc"> {
     );
 
     let verifier = [{
-        Type circType = this->callee().getType();
-        if (auto copType = circType.dyn_cast<COpType>()) {
-            circType = copType.getBaseType();
-            if (!circType || !circType.isa<FunCircType>())
-                return this->emitOpError() << "only accepts controlled ops with base type 'fcirc'!";
-        }
+        if (auto copType = this->callee().getType().dyn_cast<COpType>())
+            if (!copType.getBaseType() || !copType.getBaseType().isa<FunCircType>())
+                return this->emitOpError() << "can only be applied to circuit(-derived) types!";
 
-        auto funargTypes = circType.cast<FunCircType>().getFunType().getInputs();
-        auto funresTypes = circType.cast<FunCircType>().getFunType().getResults();
+        // make sure function arguments match
+        Operation *circValOp = this->callee().getDefiningOp();
+        while (!isa<FunCircOp>(circValOp)) {
+            if (auto cop = dyn_cast<ControlOp>(circValOp))
+                circValOp = cop.heldOp().getDefiningOp();
+            else
+                circValOp = cast<AdjointOp>(circValOp).heldOp().getDefiningOp();
+        }
+        Operation *circOp = cast<FunCircOp>(circValOp).resolveCallable();
+        FunctionType circType = circOp->getAttrOfType<TypeAttr>("type").getValue().dyn_cast<FunctionType>();
+
+        auto funargTypes = circType.getInputs();
+        auto funresTypes = circType.getResults();
 
         MLIRContext *ctx = getContext();
         if (filterRegSize(funargTypes, ctx) != filterRegSize(this->operands().getType(), ctx))
@@ -484,18 +488,18 @@ def ControlOp : QuantumSSA_Gate<"c", [Meta]> {
         %0 = "qs.alloc"() : () -> !qs.state
         %1 = "qs.alloc"() : () -> !qs.state
         %2 = "qs.allocreg"() {size=4} : () -> !qs.rstate<4>
-        %op = "qs.H"() : () -> !qs.op
+        %op = "qs.H"() : () -> !qs.u1
         // Control H op on qubit %0 and apply to qubit %1
-        "qs.c"(%op, %0, %1) : (!qs.op, !qs.state, !qs.state) -> ()
+        "qs.ctrl"(%op, %0, %1) : (!qs.u1, !qs.state, !qs.state) -> ()
         // Control H op on qubit %0 and apply to all qubits in register %2
-        "qs.c"(%op, %0, %2) : (!qs.op, !qs.state, !qs.rstate<4>) -> ()
+        "qs.ctrl"(%op, %0, %2) : (!qs.u1, !qs.state, !qs.rstate<4>) -> ()
         // Control H op on all of register %2 and apply to qubit %1
-        "qs.c"(%op, %2, %1) : (!qs.op, !qs.rstate<4>, !qs.qstate) -> ()
+        "qs.ctrl"(%op, %2, %1) : (!qs.u1, !qs.rstate<4>, !qs.qstate) -> ()
 
         // Control H op on qubit %1 but leave application open
-        %cop = "qs.c"(%op, %1) : (!qs.op, !qs.state) -> !qs.cop<1, !qs.op>
+        %cop = "qs.ctrl"(%op, %1) : (!qs.u1, !qs.state) -> !qs.cop<1, !qs.u1>
         // OR in custom assembly format
-        %cop = qs.c %op, %1 : !qs.op, !qs.state -> !qs.cop<1, !qs.op>
+        %cop = qs.ctrl %op, %1 : !qs.u1, !qs.state -> !qs.cop<1, !qs.u1>
     }];
 
     let arguments = (ins
@@ -505,7 +509,7 @@ def ControlOp : QuantumSSA_Gate<"c", [Meta]> {
     );
 
     let results = (outs
-        QDataOrCOp_Type : $res
+        AnyTypeOf<[QData_Type, ControlledOp_Type]> : $res
     );
 
     let additionalVerifier = [{
@@ -523,26 +527,32 @@ def ControlOp : QuantumSSA_Gate<"c", [Meta]> {
         // obtain total number of control qubits from input
         unsigned totalctrls = 0;
 
-        if (heldOp.isa<COpType>())
-            totalctrls += heldOp.cast<COpType>().getNumCtrls();
-
-        auto ctrls = this->ctrls().getType();
-        if (ctrls.isa<QstateType>()) {
-            totalctrls++;
-        } else if (auto regType = ctrls.dyn_cast<RstateType>()) {
-            if (auto numQubits = regType.getNumQubits())
-                totalctrls += *numQubits;
+        if (auto cop = heldOp.dyn_cast<COpType>()) {
+            if (auto numCtrls = cop.getNumCtrls())
+                totalctrls += *numCtrls;
             else
-                totalctrls = -1; // disable # of ctrl qubits check when no size is provided
-        } else {
-            assert(false && "Unknown data-type encountered in ControlOp!");
+                totalctrls = -1;
+        }
+
+        if (totalctrls != -1) {
+            auto ctrls = this->ctrls().getType();
+            if (ctrls.isa<QstateType>()) {
+                totalctrls++;
+            } else if (auto regType = ctrls.dyn_cast<RstateType>()) {
+                if (auto numQubits = regType.getNumQubits())
+                    totalctrls += *numQubits;
+                else
+                    totalctrls = -1; // disable # of ctrl qubits check when no size is provided
+            } else {
+                assert(false && "Unknown data-type encountered in ControlOp!");
+            }
         }
 
         // perform several checks on the return type, if it is a COpType
         if (this->res().getType().isa<COpType>()) {
             COpType output = this->res().getType().cast<COpType>();
             // assert correct number of control qubits
-            if (totalctrls != -1 && output.getNumCtrls() != totalctrls)
+            if (totalctrls != -1 && output.getNumCtrls() && *output.getNumCtrls() != totalctrls)
                 return this->emitOpError() << "with mismatched number of controls in return type "
                                               "vs inputs!";
 
@@ -580,15 +590,15 @@ def AdjointOp : QuantumSSA_Gate<"adj", [Meta]> {
         ```mlir
         %0 = "qs.alloc"() : () -> !qs.qstate
         %1 = "qs.allocreg"() {size=4} : () -> !qs.rstate<4>
-        %op = "qs.H"() : () -> !qs.op
+        %op = "qs.H"() : () -> !qs.u1
         // Invert H op and apply to qubit %0
-        "qs.adj"(%op, %0) : (!qs.op, !qs.qstate) -> ()
+        "qs.adj"(%op, %0) : (!qs.u1, !qs.qstate) -> ()
         // Invert H op apply to all qubits in register %1
-        "qs.adj"(%op, %1) : (!qs.op, !qs.rstate<4>) -> ()
+        "qs.adj"(%op, %1) : (!qs.u1, !qs.rstate<4>) -> ()
         // Invert H op but leave application open
-        %opdg = "qs.adj"(%op) : (!qs.op) -> !qs.op
+        %opdg = "qs.adj"(%op) : (!qs.u1) -> !qs.u1
         // OR in custom assembly format
-        %opdg = qs.adj %op : !qs.op -> !qs.op
+        %opdg = qs.adj %op : !qs.u1 -> !qs.u1
     }];
 
     let arguments = (ins
@@ -597,7 +607,7 @@ def AdjointOp : QuantumSSA_Gate<"adj", [Meta]> {
     );
 
     let results = (outs
-        QDataOrQOp_Type : $res
+        AnyTypeOf<[QData_Type, QOp_Type]> : $res
     );
 
     string additionalVerifier = [{

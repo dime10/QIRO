@@ -13,8 +13,9 @@ class Quantum_Gate<string mnemonic, list<OpTrait> traits = []> : Quantum_Op<mnem
         immediate application to specific qubits. That means that the target qubits
         need not necessarily be supplied (signifying the op is on hold) and need to
         be tagged 'optional' in ODS, with a fixed name (used by the verifier): "qbs".
-        Similarly, the output of type !q.op will only be generated for an op on hold,
-        and thus needs to be tagged 'optional' as well, with the fixed name: "op".
+        Similarly, the output, which has as type any of the quantum op types, will
+        only be generated for an op on hold, and thus needs to be tagged 'optional'
+        as well, with the fixed name: "op".
         Note that the verifier will check that only one of the two is given/returned.
     }];
 
@@ -194,7 +195,8 @@ def HOp : Quantum_Gate<"H", [Unitary, Hermitian, AttrSizedOperandSegments, RegAc
             [[1,  1],
              [1, -1]] / sqrt(2)
 
-        This operation takes a qubit as input and returns an 'op' type.
+        This operation takes a qubit or register as input or alternatively
+        returns itself with a 'u1' type.
         It acts on the qubits via side-effect by changing the quantum state.
 
         Example:
@@ -209,9 +211,9 @@ def HOp : Quantum_Gate<"H", [Unitary, Hermitian, AttrSizedOperandSegments, RegAc
         // OR in custom assembly format
         q.H %1 : !q.qureg<4>
         // Generate Hadamard op without application to qubits (to be manipulated via meta-ops)
-        $op = "q.H"() : () -> !q.op
+        $op = "q.H"() : () -> !q.u1
         // OR in custom assembly format
-        %op = q.H -> !q.op
+        %op = q.H -> !q.u1
         ```
     }];
 
@@ -222,7 +224,7 @@ def HOp : Quantum_Gate<"H", [Unitary, Hermitian, AttrSizedOperandSegments, RegAc
     );
 
     let results = (outs
-        Optional<Op_Type> : $op
+        Optional<U1_Type> : $op
     );
 
     let extraClassDeclaration = [{
@@ -257,7 +259,8 @@ def XOp : Quantum_Gate<"X", [Unitary, Hermitian, AttrSizedOperandSegments, RegAc
             [[0, 1],
              [1, 0]]
 
-        This operation takes a qubit as input and returns an 'op' type.
+        This operation takes a qubit or register as input or alternatively
+        returns itself with a 'u1' type.
         It acts on the qubits via side-effect by changing the quantum state.
 
         Example:
@@ -272,9 +275,9 @@ def XOp : Quantum_Gate<"X", [Unitary, Hermitian, AttrSizedOperandSegments, RegAc
         // OR in custom assembly format
         q.X %1 : !q.qureg<4>
         // Generate NOT op without application to qubits (to be manipulated via meta-ops)
-        $op = "q.X"() : () -> !q.op
+        $op = "q.X"() : () -> !q.u1
         // OR in custom assembly format
-        %op = q.X -> !q.op
+        %op = q.X -> !q.u1
         ```
     }];
 
@@ -285,7 +288,7 @@ def XOp : Quantum_Gate<"X", [Unitary, Hermitian, AttrSizedOperandSegments, RegAc
     );
 
     let results = (outs
-        Optional<Op_Type> : $op
+        Optional<U1_Type> : $op
     );
 
     let extraClassDeclaration = [{
@@ -320,8 +323,9 @@ def RzOp : Quantum_Gate<"RZ", [Unitary, AttrSizedOperandSegments, RegAccessInter
             [[e^-iφ/2,    0  ],
              [   0   , e^iφ/2]]
 
-        This operation takes a qubit as input and returns an 'op' type.
-        The parameter φ is passed as an attribute.
+        This operation takes a qubit or register as input or alternatively
+        returns itself with a 'u1' type. The parameter φ is mandatory and
+        can be provided as an attribute or operand.
         It acts on the qubits via side-effect by changing the quantum state.
 
         Example:
@@ -336,9 +340,9 @@ def RzOp : Quantum_Gate<"RZ", [Unitary, AttrSizedOperandSegments, RegAccessInter
         // OR in custom assembly format
         q.RZ(0.1) %1 : !q.qureg<4>
         // Generate RZ gate without application to qubits (to be manipulated via meta-ops)
-        $op = "q.RZ"() {phi=0.1} : () -> !q.op
+        $op = "q.RZ"() {phi=0.1} : () -> !q.u1
         // OR in custom assembly format
-        %op = q.RZ(0.1) -> !q.op
+        %op = q.RZ(0.1) -> !q.u1
         ```
     }];
 
@@ -351,7 +355,7 @@ def RzOp : Quantum_Gate<"RZ", [Unitary, AttrSizedOperandSegments, RegAccessInter
     );
 
     let results = (outs
-        Optional<Op_Type> : $op
+        Optional<U1_Type> : $op
     );
 
     let verifier = [{
@@ -396,8 +400,9 @@ def ROp : Quantum_Gate<"R", [Unitary, AttrSizedOperandSegments, RegAccessInterfa
             [[1,   0 ],
              [0, e^iφ]]
 
-        This operation takes a qubit as input and returns an 'op' type.
-        The parameter φ is passed as an attribute.
+        This operation takes a qubit or register as input or alternatively
+        returns itself with a 'u1' type. The parameter φ is mandatory and
+        can be provided as an attribute or operand.
         It acts on the qubits via side-effect by changing the quantum state.
 
         Example:
@@ -412,9 +417,9 @@ def ROp : Quantum_Gate<"R", [Unitary, AttrSizedOperandSegments, RegAccessInterfa
         // OR in custom assembly format
         q.R(0.1) %1 : !q.qureg<4>
         // Generate R gate without application to qubits (to be manipulated via meta-ops)
-        $op = "q.R"() {phi=0.1} : () -> !q.op
+        $op = "q.R"() {phi=0.1} : () -> !q.u1
         // OR in custom assembly format
-        %op = q.R(0.1) -> !q.op
+        %op = q.R(0.1) -> !q.u1
         ```
     }];
 
@@ -427,7 +432,7 @@ def ROp : Quantum_Gate<"R", [Unitary, AttrSizedOperandSegments, RegAccessInterfa
     );
 
     let results = (outs
-        Optional<Op_Type> : $op
+        Optional<U1_Type> : $op
     );
 
     let verifier = [{
@@ -476,7 +481,7 @@ def CNotOp : Quantum_Gate<"CX", [Unitary, Hermitian, AttrSizedOperandSegments, R
 
         As with other basic operations, the target is allowed to be either a qubit or
         a register (in which case the gate is applied to every qubit in the register).
-        The control however must be a singular qubit. The return type is a 'cop'.
+        The control however must be a singular qubit. The return type is 'u2'.
         It acts on the qubits via side-effect by changing the quantum state.
         Note that the control qubit MUST NOT appear as one of target qubits (not checked atm).
 
@@ -493,9 +498,9 @@ def CNotOp : Quantum_Gate<"CX", [Unitary, Hermitian, AttrSizedOperandSegments, R
         // OR in custom assembly format
         q.CX %0, %2 : !q.qubit, !q.qureg<4>
         // Generate CNOT gate without application to qubits (to be manipulated via meta-ops)
-        $op = "q.CX"(%0) : (!q.qubit) -> !q.cop<1>
+        $op = "q.CX"(%0) : (!q.qubit) -> !q.u2
         // OR in custom assembly format
-        $op = q.CX %0 : !q.qubit -> !q.cop<1>
+        $op = q.CX %0 : !q.qubit -> !q.u2
         ```
     }];
 
@@ -509,7 +514,7 @@ def CNotOp : Quantum_Gate<"CX", [Unitary, Hermitian, AttrSizedOperandSegments, R
     );
 
     let results = (outs
-        Optional<ControlledOp_Type> : $op
+        Optional<U2_Type> : $op
     );
 
     let additionalVerifier = [{
@@ -822,17 +827,18 @@ def ControlOp : Quantum_Gate<"c", [Meta, AttrSizedOperandSegments, RegAccessInte
         %0 = "q.alloc"() : () -> !q.qubit
         %1 = "q.alloc"() : () -> !q.qubit
         %2 = "q.allocreg"() {size=4} : () -> !q.qureg<4>
-        %op = "q.H"() : () -> !q.op
+        %op = "q.H"() : () -> !q.u1
         // Control H op on qubit %0 and apply to qubit %1
-        "q.c"(%op, %0, %1) : (!q.op, !q.qubit, !q.qubit) -> ()
+        "q.ctrl"(%op, %0, %1) : (!q.u1, !q.qubit, !q.qubit) -> ()
         // Control H op on qubit %0 and apply to all qubits in register %2
-        "q.c"(%op, %0, %2) : (!q.op, !q.qubit, !q.qureg<4>) -> ()
+        "q.ctrl"(%op, %0, %2) : (!q.u1, !q.qubit, !q.qureg<4>) -> ()
         // Control H op on all of register %2 and apply to qubit %1
-        "q.c"(%op, %2, %1) : (!q.op, !q.qureg<4>, !q.qubit) -> ()
+        "q.ctrl"(%op, %2, %1) : (!q.u1, !q.qureg<4>, !q.qubit) -> ()
         // Control H op on qubit %0 but leave application open
-        %cop = "q.c"(%op, %1) : (!q.op, !q.qubit) -> !q.cop<1>
+        %cop = "q.ctrl"(%op, %1) : (!q.u1, !q.qubit) -> !q.cop<1>
         // OR in custom assembly format
-        %cop = q.c %op, %1 : !q.op, !q.qubit -> !q.cop<1>
+        %cop = q.ctrl %op, %1 : !q.u1, !q.qubit -> !q.cop<1>
+        ```
     }];
 
     let arguments = (ins
@@ -859,19 +865,25 @@ def ControlOp : Quantum_Gate<"c", [Meta, AttrSizedOperandSegments, RegAccessInte
         // obtain total number of control qubits from input
         int totalctrls = 0;
 
-        if (heldOp.isa<COpType>())
-            totalctrls += heldOp.cast<COpType>().getNumCtrls();
-
-        auto ctrls = this->ctrls().getType();
-        if (ctrls.isa<QubitType>()) {
-            totalctrls++;
-        } else if (auto regType = ctrls.dyn_cast<QuregType>()) {
-            if (auto numQubits = regType.getNumQubits())
-                totalctrls += *numQubits;
+        if (auto cop = heldOp.dyn_cast<COpType>()) {
+            if (auto numCtrls = cop.getNumCtrls())
+                totalctrls += *numCtrls;
             else
-                totalctrls = -1; // disable # of ctrl qubits check when no size is provided
-        } else {
-            assert(false && "Unknown data-type encountered in ControlOp!");
+                totalctrls = -1;
+        }
+
+        if (totalctrls != -1) {
+            auto ctrls = this->ctrls().getType();
+            if (ctrls.isa<QubitType>()) {
+                totalctrls++;
+            } else if (auto regType = ctrls.dyn_cast<QuregType>()) {
+                if (auto numQubits = regType.getNumQubits())
+                    totalctrls += *numQubits;
+                else
+                    totalctrls = -1; // disable # of ctrl qubits check when no size is provided
+            } else {
+                assert(false && "Unknown data-type encountered in ControlOp!");
+            }
         }
 
         // disable # of ctrl qubits check when using register accessors
@@ -890,7 +902,7 @@ def ControlOp : Quantum_Gate<"c", [Meta, AttrSizedOperandSegments, RegAccessInte
         if (this->op()) {
             COpType output = this->op().getType().cast<COpType>();
             // assert correct number of control qubits
-            if (totalctrls != -1 && output.getNumCtrls() != totalctrls)
+            if (totalctrls != -1 && output.getNumCtrls() && *output.getNumCtrls() != totalctrls)
                 return this->emitOpError() << "with mismatched number of controls in return type "
                                               "vs inputs!";
 
@@ -953,15 +965,16 @@ def AdjointOp : Quantum_Gate<"adj", [Meta, AttrSizedOperandSegments, RegAccessIn
         ```mlir
         %0 = "q.alloc"() : () -> !q.qubit
         %1 = "q.allocreg"() {size=4} : () -> !q.qureg<4>
-        %op = "q.H"() : () -> !q.op
+        %op = "q.H"() : () -> !q.u1
         // Invert H op and apply to qubit %0
-        "q.adj"(%op, %0) : (!q.op, !q.qubit) -> ()
+        "q.adj"(%op, %0) : (!q.u1, !q.qubit) -> ()
         // Invert H op apply to all qubits in register %1
-        "q.adj"(%op, %1) : (!q.op, !q.qureg<4>) -> ()
+        "q.adj"(%op, %1) : (!q.u1, !q.qureg<4>) -> ()
         // Invert H op but leave application open
-        %opdg = "q.adj"(%op) : (!q.op) -> !q.op
+        %opdg = "q.adj"(%op) : (!q.u1) -> !q.u1
         // OR in custom assembly format
-        %opdg = q.adj %op : !q.op -> !q.op
+        %opdg = q.adj %op : !q.u1 -> !q.u1
+        ```
     }];
 
     let arguments = (ins

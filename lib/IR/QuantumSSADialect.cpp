@@ -23,7 +23,7 @@ void QuantumSSADialect::initialize() {
         #include "QuantumSSAOps.cpp.inc"
     >();
 
-    addTypes<QstateType, RstateType, OpType, COpType, FunCircType>();
+    addTypes<QstateType, RstateType, U1Type, U2Type, COpType, FunCircType>();
 }
 
 namespace mlir {
@@ -64,43 +64,28 @@ struct RstateTypeStorage : public TypeStorage {
 
 // This class represents the internal storage of the Quantum 'COpType'.
 struct COpTypeStorage : public TypeStorage {
-    using KeyTy = std::pair<unsigned, Type>;
+    using KeyTy = std::pair<int, Type>;
 
-    unsigned nctrl;
+    llvm::Optional<int> nctrl;
     Type baseType;
 
-    COpTypeStorage(unsigned nctrl, Type baseType) {
-        assert(nctrl > 0 && "Number of controls must be > 0");
+    COpTypeStorage(llvm::Optional<int> nctrl, Type baseType) {
+        assert(!nctrl || *nctrl > 0 && "Number of controls must be > 0");
         if (baseType)
-            assert(baseType.isa<OpType>() || baseType.isa<FunCircType>() &&
+            assert(baseType.isa<U1Type>() || baseType.isa<U2Type>() || baseType.isa<FunCircType>() &&
                    "Base type of controlled op can only be supported quantum operations!");
         this->nctrl = nctrl;
         this->baseType = baseType;
     }
 
-    bool operator==(const KeyTy &key) const { return key.first == nctrl && key.second == baseType; }
+    bool operator==(const KeyTy &key) const {
+        return nctrl == (key.first < 0 ? llvm::None : llvm::Optional<int>(key.first))
+            && key.second == baseType;
+    }
 
     static COpTypeStorage *construct(TypeStorageAllocator &allocator, const KeyTy &key) {
-        return new (allocator.allocate<COpTypeStorage>()) COpTypeStorage(key.first, key.second);
-    }
-};
-
-// This class represents the internal storage of the Quantum 'FunCircType'.
-struct FunCircTypeStorage : public TypeStorage {
-    using KeyTy = FunctionType;
-
-    FunctionType funtype;
-
-    FunCircTypeStorage(FunctionType funtype) { this->funtype = funtype; }
-
-    static llvm::hash_code hashKey(const KeyTy &funtype) {
-        return hash_value(funtype);
-    }
-
-    bool operator==(const KeyTy &key) const { return key == this->funtype; }
-
-    static FunCircTypeStorage *construct(TypeStorageAllocator &allocator, const KeyTy &key) {
-        return new (allocator.allocate<FunCircTypeStorage>()) FunCircTypeStorage(key);
+        llvm::Optional<int> nctrl = key.first < 0 ? llvm::None : llvm::Optional<int>(key.first);
+        return new (allocator.allocate<COpTypeStorage>()) COpTypeStorage(nctrl, key.second);
     }
 };
 } // end namespace detail
@@ -125,12 +110,13 @@ llvm::Optional<int> RstateType::getNumQubits() {
 }
 
 // COp
-COpType COpType::get(MLIRContext *ctx, unsigned nctrl, Type baseType) {
+COpType COpType::get(MLIRContext *ctx, llvm::Optional<int> nctrl, Type baseType) {
     // Parameters to the storage class are passed after the custom type kind.
-    return Base::get(ctx, nctrl, baseType);
+    detail::COpTypeStorage::KeyTy key = {nctrl ? *nctrl : -1, baseType};
+    return Base::get(ctx, key);
 }
 
-unsigned COpType::getNumCtrls() {
+llvm::Optional<int> COpType::getNumCtrls() {
     // 'getImpl' returns a pointer to our internal storage instance.
     return getImpl()->nctrl;
 }
@@ -138,17 +124,6 @@ unsigned COpType::getNumCtrls() {
 Type COpType::getBaseType() {
     // 'getImpl' returns a pointer to our internal storage instance.
     return getImpl()->baseType;
-}
-
-// FunCirc
-FunCircType FunCircType::get(MLIRContext *ctx, FunctionType funtype) {
-    // Parameters to the storage class are passed after the custom type kind.
-    return Base::get(ctx, funtype);
-}
-
-FunctionType FunCircType::getFunType() {
-    // 'getImpl' returns a pointer to our internal storage instance.
-    return getImpl()->funtype;
 }
 
 
@@ -165,12 +140,13 @@ void QuantumSSADialect::printType(Type type, DialectAsmPrinter &printer) const {
                                                 if (auto numQubits = t.getNumQubits())
                                                     printer << *numQubits;
                                                 printer << ">"; })
-        .Case<OpType>     ([&](OpType)        { printer << "op"; })
-        .Case<COpType>    ([&](COpType t)     { printer << "cop<" << t.getNumCtrls();
-                                                if (auto baseType = t.getBaseType())
-                                                    printer << ", " << baseType;
-                                                printer << ">"; })
-        .Case<FunCircType>([&](FunCircType t) { printer << "fcirc<" << t.getFunType() << ">"; })
+        .Case<U1Type>   ([&](U1Type)          { printer << "u1"; })
+        .Case<U2Type>   ([&](U2Type)          { printer << "u2"; })
+        .Case<COpType>    ([&](COpType t)     { printer << "cop<";
+                                                if (auto numCtrls = t.getNumCtrls())
+                                                    printer << *numCtrls << ", ";
+                                                printer << t.getBaseType() << ">"; })
+        .Case<FunCircType>([&](FunCircType)   { printer << "fcirc"; })
         .Default([](Type) { llvm_unreachable("unrecognized type encountered in the printer!"); });
 }
 
@@ -191,9 +167,10 @@ Type QuantumSSADialect::parseType(DialectAsmParser &parser) const {
     Type result = llvm::StringSwitch<function_ref<Type()>>(keyword)
         .Case("qstate", [&] { return builder.getType<QstateType>(); })
         .Case("rstate", [&] { return parseRstateType(parser); })
-        .Case("op",     [&] { return builder.getType<OpType>(); })
+        .Case("u1",     [&] { return builder.getType<U1Type>(); })
+        .Case("u2",     [&] { return builder.getType<U2Type>(); })
         .Case("cop",    [&] { return parseCOpType(parser); })
-        .Case("fcirc",  [&] { return parseFunCircType(parser); })
+        .Case("fcirc",  [&] { return builder.getType<FunCircType>(); })
         .Default([&] { return EMIT_ERROR(parser, "unrecognized quantumssa type!"), nullptr; })();
 
     return result;
@@ -221,32 +198,31 @@ Type QuantumSSADialect::parseRstateType(DialectAsmParser &parser) {
 Type QuantumSSADialect::parseCOpType(DialectAsmParser &parser) {
     StringRef errmsg = "error during 'COp' type parsing!";
     Type baseType(nullptr);
+    llvm::Optional<int> optionalNctrl;
     int nctrl;
 
-    if (parser.parseLess() || parser.parseInteger<int>(nctrl))
+    if (parser.parseLess())
         return EMIT_ERROR(parser, errmsg), nullptr;
 
-    if (succeeded(parser.parseOptionalComma()))
-        if (parser.parseType(baseType))
+    auto res = parser.parseOptionalInteger<int>(nctrl);
+    if (res.hasValue() && failed(res.getValue()))
+        return EMIT_ERROR(parser, errmsg), nullptr;
+    else if (res.hasValue())
+        if (parser.parseComma())
             return EMIT_ERROR(parser, errmsg), nullptr;
+    optionalNctrl = res.hasValue() ? llvm::Optional<int>(nctrl) : llvm::None;
+
+    if (parser.parseType(baseType))
+        return EMIT_ERROR(parser, errmsg), nullptr;
 
     if (parser.parseGreater())
         return EMIT_ERROR(parser, errmsg), nullptr;
 
-    if (baseType && !(baseType.isa<OpType>() || baseType.isa<FunCircType>()))
-        return EMIT_ERROR(parser, "base type of controlled op must be either 'Op' or 'Circ' type!"),
+    if (baseType && !(baseType.isa<U1Type>() || baseType.isa<U2Type>() || baseType.isa<FunCircType>()))
+        return EMIT_ERROR(parser, "Base type of COp must be either 'u1', 'u2', or 'circ'!"),
                nullptr;
 
-    return parser.getBuilder().getType<COpType>(nctrl, baseType);
-}
-
-Type QuantumSSADialect::parseFunCircType(DialectAsmParser &parser) {
-    FunctionType funtype;
-
-    if (parser.parseLess() || parser.parseType<FunctionType>(funtype) || parser.parseGreater())
-        return EMIT_ERROR(parser, "error during 'FunCirc' type parsing!"), nullptr;
-
-    return parser.getBuilder().getType<FunCircType>(funtype);
+    return parser.getBuilder().getType<COpType>(optionalNctrl, baseType);
 }
 
 

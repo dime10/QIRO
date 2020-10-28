@@ -58,12 +58,22 @@ public:
     llvm::Optional<int> getNumQubits();
 };
 
-// This class represents a singular quantum operation (such as a gate).
-class OpType : public Type::TypeBase<OpType, mlir::Type, mlir::TypeStorage> {
+// This class represents a native quantum gate on one qubit.
+class U1Type : public Type::TypeBase<U1Type, mlir::Type, mlir::TypeStorage> {
 public:
     using Base::Base;
 
-    static OpType get(mlir::MLIRContext *ctx) {
+    static U1Type get(mlir::MLIRContext *ctx) {
+        return Base::get(ctx);
+    }
+};
+
+// This class represents a native quantum gate on two qubits.
+class U2Type : public Type::TypeBase<U2Type, mlir::Type, mlir::TypeStorage> {
+public:
+    using Base::Base;
+
+    static U2Type get(mlir::MLIRContext *ctx) {
         return Base::get(ctx);
     }
 };
@@ -74,9 +84,9 @@ class COpType : public Type::TypeBase<COpType, mlir::Type, detail::COpTypeStorag
 public:
     using Base::Base;
 
-    static COpType get(mlir::MLIRContext *ctx, unsigned nctrl, Type baseType);
+    static COpType get(mlir::MLIRContext *ctx, llvm::Optional<int> nctrl, Type baseType);
 
-    unsigned getNumCtrls();
+    llvm::Optional<int> getNumCtrls();
 
     Type getBaseType();
 };
