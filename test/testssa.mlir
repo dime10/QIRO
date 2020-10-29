@@ -7,8 +7,9 @@ module {
     %size = constant 8 : index
 
     %q0_0 = qs.alloc -> !qs.qstate
+    %q1_0 = qs.alloc -> !qs.qstate
     %r0_0 = qs.allocreg(4) -> !qs.rstate<4>
-    %r1_0 = qs.allocreg(%size) : index -> !qs.rstate<>
+    %r1_0 = qs.allocreg(%size) -> !qs.rstate<>
 
     %h = qs.H -> !qs.u1
     %q0_1 = qs.H %q0_0 : !qs.qstate -> !qs.qstate
@@ -21,18 +22,17 @@ module {
     %q0_3 = qs.X %q0_2 : !qs.qstate -> !qs.qstate
     %q0_4 = qs.RZ(%fp) %q0_3 : f64, !qs.qstate -> !qs.qstate
     %q0_5 = qs.R(%fp) %q0_4 : f64, !qs.qstate -> !qs.qstate
-    %q0_6 = qs.CX %q0_0, %q0_5 : !qs.qstate, !qs.qstate -> !qs.qstate
-    %r0_2 = qs.CX %q0_0, %r0_1 : !qs.qstate, !qs.rstate<4> -> !qs.rstate<4>
-    //%q0_6 = qs.CX %q0_5, %q0_5 : !qs.qstate, !qs.qstate -> !qs.qstate // same trgt & ctrl
+    %q1_1, %q0_7 = qs.CX %q1_0, %q0_5 : !qs.qstate, !qs.qstate -> !qs.qstate, !qs.qstate
+    %q1_3, %r0_2 = qs.CX %q1_1, %r0_1 : !qs.qstate, !qs.rstate<4> -> !qs.qstate, !qs.rstate<4>
 
-    %ch = qs.c %h, %q0_0 : !qs.u1, !qs.qstate -> !qs.cop<1, !qs.u1>
-    %q0_7 = qs.c %h, %q0_0, %q0_6 : !qs.u1, !qs.qstate, !qs.qstate -> !qs.qstate
-    %q0_8 = qs.c %h, %r0_0, %q0_7 : !qs.u1, !qs.rstate<4>, !qs.qstate -> !qs.qstate
-    %r0_3 = qs.c %h, %q0_0, %r0_2 : !qs.u1, !qs.qstate, !qs.rstate<4> -> !qs.rstate<4>
+    %q1_4, %ch = qs.ctrl %h, %q1_3 : !qs.u1, !qs.qstate -> !qs.qstate, !qs.cop<1, !qs.u1>
+    %q1_5, %q0_10 = qs.ctrl %h, %q1_4, %q0_7 : !qs.u1, !qs.qstate, !qs.qstate -> !qs.qstate, !qs.qstate
+    %r0_3, %q0_11 = qs.ctrl %h, %r0_2, %q0_10 : !qs.u1, !qs.rstate<4>, !qs.qstate -> !qs.rstate<4>, !qs.qstate
+    %q1_6, %r0_4 = qs.ctrl %h, %q1_5, %r0_3 : !qs.u1, !qs.qstate, !qs.rstate<4> -> !qs.qstate, !qs.rstate<4>
 
     %ah = qs.adj %h : !qs.u1 -> !qs.u1
-    %q0_9 = qs.adj %h, %q0_8 : !qs.u1, !qs.qstate -> !qs.qstate
-    %r0_4 = qs.adj %h, %r0_3 : !qs.u1, !qs.rstate<4> -> !qs.rstate<4>
+    %q0_12 = qs.adj %h, %q0_11 : !qs.u1, !qs.qstate -> !qs.qstate
+    %r0_5 = qs.adj %h, %r0_4 : !qs.u1, !qs.rstate<4> -> !qs.rstate<4>
 
     // test new return statement
     qs.circ @retTest(%arg : !qs.qstate) -> !qs.qstate {
@@ -43,13 +43,13 @@ module {
     %circ = qs.getval @retTest -> !qs.circ
 
     // apply meta op the function circuit
-    %ccirc = qs.c %circ, %q0_0 : !qs.circ, !qs.qstate -> !qs.cop<1, !qs.circ>
+    %q1_7, %ccirc = qs.ctrl %circ, %q1_6 : !qs.circ, !qs.qstate -> !qs.qstate, !qs.cop<1, !qs.circ>
     %acirc = qs.adj %circ : !qs.circ -> !qs.circ
 
     // execute the function circuits
-    %q0_10 = qs.call @retTest(%q0_9) : !qs.qstate -> !qs.qstate
-    %q0_11 = qs.apply %circ(%q0_10) : !qs.circ(!qs.qstate -> !qs.qstate)
-    %q0_12 = qs.apply %ccirc(%q0_11) : !qs.cop<1, !qs.circ>(!qs.qstate -> !qs.qstate)
-    %q0_13 = qs.apply %acirc(%q0_12) : !qs.circ(!qs.qstate -> !qs.qstate)
-    //%q0_14 = qs.apply %ch(%q0_13) : !qs.cop<1, !qs.u1>>(!qs.qstate) // only works on circ types
+    %q0_20 = qs.call @retTest(%q0_12) : !qs.qstate -> !qs.qstate
+    %q0_21 = qs.apply %circ(%q0_20) : !qs.circ(!qs.qstate -> !qs.qstate)
+    %q0_22 = qs.apply %ccirc(%q0_21) : !qs.cop<1, !qs.circ>(!qs.qstate -> !qs.qstate)
+    %q0_23 = qs.apply %acirc(%q0_22) : !qs.circ(!qs.qstate -> !qs.qstate)
+    //%q0_24 = qs.apply %ch(%q0_23) : !qs.cop<1, !qs.u1>>(!qs.qstate) // only works on circ types
 }

@@ -182,8 +182,8 @@ public:
 
             if (isa<quantum::AllocOp>(op) || isa<quantum::AllocRegOp>(op)) {
                 if (isa<quantum::AllocOp>(op)) {
-                    opState = OperationState(op->getLoc(), AllocQbOp::getOperationName());
-                    AllocQbOp::build(opBuilder, opState, opBuilder.getType<QstateType>());
+                    opState = OperationState(op->getLoc(), quantumssa::AllocOp::getOperationName());
+                    quantumssa::AllocOp::build(opBuilder, opState, opBuilder.getType<QstateType>());
                 } else {
                     quantum::AllocRegOp regOp = cast<quantum::AllocRegOp>(op);
                     IntegerAttr staticSize = regOp.static_sizeAttr();
@@ -214,9 +214,9 @@ public:
                 else if (isa<quantum::CNotOp>(op))
                     CNotOp::build(opBuilder, opState, retType, ctrlState, trgtState);
                 else if (isa<quantum::ControlOp>(op))
-                    ControlOp::build(opBuilder, opState, retType, heldOp, ctrlState, trgtState);
+                    ControlOp::build(opBuilder, opState, retType, heldOp, ctrlState, trgtState, trgtState); //fix
                 else if (isa<quantum::AdjointOp>(op))
-                    AdjointOp::build(opBuilder, opState, retType, heldOp, trgtState);
+                    AdjointOp::build(opBuilder, opState, retType, heldOp, trgtState, trgtState); //fix
                 newOp = opBuilder.createOperation(opState);
 
                 // cleanup

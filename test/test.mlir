@@ -18,7 +18,7 @@ module {
     %2 = "q.allocreg"() {static_size=4} : () -> !q.qureg<4>
     %3 =  q.allocreg(4) -> !q.qureg<4>
     %4 = "q.allocreg"(%size) : (index) -> !q.qureg<>
-    %5 =  q.allocreg(%size) : index -> !q.qureg<>
+    %5 =  q.allocreg(%size) -> !q.qureg<>
 
 
     // test basic gates, including their custom assembly formats
@@ -59,20 +59,20 @@ module {
     "q.RZ"(%2) {static_phi = 0.1, operand_segment_sizes = dense<[0, 1, 0]> : vector<3xi32>, static_range = []} : (!q.qureg<4>) -> ()
     q.RZ(0.1) %2 : !q.qureg<4>
     "q.RZ"(%fp, %0) {operand_segment_sizes = dense<[1, 1, 0]> : vector<3xi32>, static_range = []} : (f64, !q.qubit) -> ()
-    q.RZ(%fp) %0 : f64, !q.qubit
+    q.RZ(%fp: f64) %0 : !q.qubit
     %op4 = "q.RZ"() {static_phi = 0.1, operand_segment_sizes = dense<0> : vector<3xi32>, static_range = []} : () -> !q.u1
     %op5 = q.RZ(0.1) -> !q.u1
     %op6 = "q.RZ"(%fp) {operand_segment_sizes = dense<[1, 0, 0]> : vector<3xi32>, static_range = []} : (f64) -> !q.u1
-    %op7 = q.RZ(%fp) : f64 -> !q.u1
+    %op7 = q.RZ(%fp: f64) -> !q.u1
     //q.RZ() %0 : !q.qubit                           // need to provide angle
-    //q.RZ(%fp) %0 {static_phi=0.1} : f64, !q.qubit  // cannot provide angle twice
+    //q.RZ(%fp: f64) %0 {static_phi=0.1} : !q.qubit  // cannot provide angle twice
 
     q.RZ(0.1) %2[2] : !q.qureg<4>
-    q.RZ(%fp) %2[2] : f64, !q.qureg<4>
+    q.RZ(%fp: f64) %2[2] : !q.qureg<4>
     q.RZ(0.1) %2[%a,%b] : !q.qureg<4>
-    q.RZ(%fp) %2[%a,%b] : f64, !q.qureg<4>
+    q.RZ(%fp: f64) %2[%a,%b] : !q.qureg<4>
     q.RZ(0.1) %2[1,%b,2] : !q.qureg<4>
-    q.RZ(%fp) %2[1,%b,2] : f64, !q.qureg<4>
+    q.RZ(%fp: f64) %2[1,%b,2] : !q.qureg<4>
 
 
     "q.R"(%0) {static_phi = 0.1, operand_segment_sizes = dense<[0, 1, 0]> : vector<3xi32>, static_range = []} : (!q.qubit) -> ()
@@ -80,27 +80,26 @@ module {
     "q.R"(%2) {static_phi = 0.1, operand_segment_sizes = dense<[0, 1, 0]> : vector<3xi32>, static_range = []} : (!q.qureg<4>) -> ()
     q.R(0.1) %2 : !q.qureg<4>
     "q.R"(%fp, %0) {operand_segment_sizes = dense<[1, 1, 0]> : vector<3xi32>, static_range = []} : (f64, !q.qubit) -> ()
-    q.R(%fp) %0 : f64, !q.qubit
+    q.R(%fp: f64) %0 : !q.qubit
     %op8 = "q.R"() {static_phi = 0.1, operand_segment_sizes = dense<0> : vector<3xi32>, static_range = []} : () -> !q.u1
     %op9 = q.R(0.1) -> !q.u1
     %op10 = "q.R"(%fp) {operand_segment_sizes = dense<[1, 0, 0]> : vector<3xi32>, static_range = []} : (f64) -> !q.u1
-    %op11 = q.R(%fp) : f64 -> !q.u1
+    %op11 = q.R(%fp: f64) -> !q.u1
 
     q.R(0.1) %2[2] : !q.qureg<4>
-    q.R(%fp) %2[2] : f64, !q.qureg<4>
+    q.R(%fp: f64) %2[2] : !q.qureg<4>
     q.R(0.1) %2[%a,%b] : !q.qureg<4>
-    q.R(%fp) %2[%a,%b] : f64, !q.qureg<4>
+    q.R(%fp: f64) %2[%a,%b] : !q.qureg<4>
     q.R(0.1) %2[1,%b,2] : !q.qureg<4>
-    q.R(%fp) %2[1,%b,2] : f64, !q.qureg<4>
+    q.R(%fp: f64) %2[1,%b,2] : !q.qureg<4>
 
 
     "q.CX"(%0, %1) {operand_segment_sizes = dense<[1, 0, 1, 0]> : vector<4xi32>, static_crange = [], static_qrange = []} : (!q.qubit, !q.qubit) -> ()
     q.CX %0, %1 : !q.qubit, !q.qubit
     "q.CX"(%0, %2) {operand_segment_sizes = dense<[1, 0, 1, 0]> : vector<4xi32>, static_crange = [], static_qrange = []} : (!q.qubit, !q.qureg<4>) -> ()
     q.CX %0, %2 : !q.qubit, !q.qureg<4>
-    //q.CX %0, %0 : !q.qubit, !q.qubit // cannot use same qubit as control and target
-    %op12 = "q.CX"(%0) {operand_segment_sizes = dense<[1, 0, 0, 0]> : vector<4xi32>, static_crange = [], static_qrange = []} : (!q.qubit) -> !q.u2
-    %op13 = q.CX %0 : !q.qubit -> !q.u2
+    %op12 = "q.CX"() {operand_segment_sizes = dense<0> : vector<4xi32>, static_crange = [], static_qrange = []} : () -> !q.u2
+    %op13 = q.CX -> !q.u2
 
     q.CX %0, %2[2] : !q.qubit, !q.qureg<4>
     q.CX %0, %2[%a,%b] : !q.qubit, !q.qureg<4>
@@ -174,53 +173,58 @@ module {
 
 
     // test control meta operation, including on: ops, cops, and circs
-    "q.c"(%op0, %0, %1) {operand_segment_sizes = dense<[1, 1, 0, 1, 0]> : vector<5xi32>, static_crange = [], static_qrange = []} : (!q.u1, !q.qubit, !q.qubit) -> ()
-    q.c %op0, %0, %1 : !q.u1, !q.qubit, !q.qubit
-    "q.c"(%op0, %0, %2) {operand_segment_sizes = dense<[1, 1, 0, 1, 0]> : vector<5xi32>, static_crange = [], static_qrange = []} : (!q.u1, !q.qubit, !q.qureg<4>) -> ()
-    q.c %op0, %0, %2 : !q.u1, !q.qubit, !q.qureg<4>
-    "q.c"(%op0, %2, %1) {operand_segment_sizes = dense<[1, 1, 0, 1, 0]> : vector<5xi32>, static_crange = [], static_qrange = []} : (!q.u1, !q.qureg<4>, !q.qubit) -> ()
-    q.c %op0, %2, %1 : !q.u1, !q.qureg<4>, !q.qubit
-    "q.c"(%op12, %0, %1) {operand_segment_sizes = dense<[1, 1, 0, 1, 0]> : vector<5xi32>, static_crange = [], static_qrange = []} : (!q.u2, !q.qubit, !q.qubit) -> ()
-    q.c %op12, %0, %1 : !q.u2, !q.qubit, !q.qubit
-    %cop0 = "q.c"(%op0, %0) {operand_segment_sizes = dense<[1, 1, 0, 0, 0]> : vector<5xi32>, static_crange = [], static_qrange = []} : (!q.u1, !q.qubit) -> !q.cop<1, !q.u1>
-    %cop1 = q.c %op0, %0 : !q.u1, !q.qubit -> !q.cop<1, !q.u1>
-    %cop2 = "q.c"(%op12, %0) {operand_segment_sizes = dense<[1, 1, 0, 0, 0]> : vector<5xi32>, static_crange = [], static_qrange = []} : (!q.u2, !q.qubit) -> !q.cop<1, !q.u2>
-    %cop3 = q.c %op12, %0 : !q.u2, !q.qubit -> !q.cop<1, !q.u2>
-    %ccop0 = "q.c"(%cop0, %2) {operand_segment_sizes = dense<[1, 1, 0, 0, 0]> : vector<5xi32>, static_crange = [], static_qrange = []} : (!q.cop<1, !q.u1>, !q.qureg<4>) -> !q.cop<5, !q.u1>
-    %ccop1 =  q.c %cop0, %2 : !q.cop<1, !q.u1>, !q.qureg<4> -> !q.cop<5, !q.u1>
-    %ccirc0 = "q.c"(%circ0, %0) {operand_segment_sizes = dense<[1, 1, 0, 0, 0]> : vector<5xi32>, static_crange = [], static_qrange = []} : (!q.circ, !q.qubit) -> !q.cop<1, !q.circ>
-    %ccirc1 =  q.c %circ0, %0 : !q.circ, !q.qubit -> !q.cop<1, !q.circ>
-    //q.c %circ0, %0, %1 : !q.circ, !q.qubit, !q.qubit   // can't apply circ by passing qubits
-    //q.c %op0, %2, %2 : !q.u1, !q.qureg<4>, !q.qureg<4> // can't use same qubits for ctrl and trgt
-    //q.c %op0, %2 : !q.u1, !q.qureg<4> -> !q.cop<5>                   // # controls mismatch
-    //q.c %ccop0, %2 : !q.cop<5, !q.u1>, !q.qureg<4> -> !q.cop<3>      // # total controls mismatch
-    //q.c %op0, %0 : !q.u1, !q.qubit -> !q.cop<1, !q.circ>             // wrong base type
-    //q.c %op0, %0 : !q.u1, !q.qubit -> !q.cop<1>                      // must provide base type
-    //q.c %cop0, %0 : !q.cop<1, !q.u1>, !q.qubit -> !q.cop<1, !q.cop<1, !q.u1>> // can't use cop as base type
-    //q.c %cop0, %0 : !q.cop<1, !q.u1>, !q.qubit -> !q.cop<2, !q.circ> // must preserve base type
-    //q.c %cop0, %0 : !q.cop<1, !q.u1>, !q.qubit -> !q.cop<2>          // must preserve base type
+    "q.ctrl"(%op0, %0, %1) {operand_segment_sizes = dense<[1, 1, 0, 1, 0, 0, 0]> : vector<7xi32>, static_crange = [], static_range = [], static_range2 = []} : (!q.u1, !q.qubit, !q.qubit) -> ()
+    q.ctrl %op0, %0, %1 : !q.u1, !q.qubit, !q.qubit
+    "q.ctrl"(%op0, %0, %2) {operand_segment_sizes = dense<[1, 1, 0, 1, 0, 0, 0]> : vector<7xi32>, static_crange = [], static_range = [], static_range2 = []} : (!q.u1, !q.qubit, !q.qureg<4>) -> ()
+    q.ctrl %op0, %0, %2 : !q.u1, !q.qubit, !q.qureg<4>
+    "q.ctrl"(%op0, %2, %1) {operand_segment_sizes = dense<[1, 1, 0, 1, 0, 0, 0]> : vector<7xi32>, static_crange = [], static_range = [], static_range2 = []} : (!q.u1, !q.qureg<4>, !q.qubit) -> ()
+    q.ctrl %op0, %2, %1 : !q.u1, !q.qureg<4>, !q.qubit
+    "q.ctrl"(%op12, %0, %1, %2) {operand_segment_sizes = dense<[1, 1, 0, 1, 0, 1, 0]> : vector<7xi32>, static_crange = [], static_range = [], static_range2 = []} : (!q.u2, !q.qubit, !q.qubit, !q.qureg<4>) -> ()
+    q.ctrl %op12, %0, %1, %2 : !q.u2, !q.qubit, !q.qubit, !q.qureg<4>
+    %cop0 = "q.ctrl"(%op0, %0) {operand_segment_sizes = dense<[1, 1, 0, 0, 0, 0, 0]> : vector<7xi32>, static_crange = [], static_range = [], static_range2 = []} : (!q.u1, !q.qubit) -> !q.cop<1, !q.u1>
+    %cop1 = q.ctrl %op0, %0 : !q.u1, !q.qubit -> !q.cop<1, !q.u1>
+    %cop2 = "q.ctrl"(%op12, %0) {operand_segment_sizes = dense<[1, 1, 0, 0, 0, 0, 0]> : vector<7xi32>, static_crange = [], static_range = [], static_range2 = []} : (!q.u2, !q.qubit) -> !q.cop<1, !q.u2>
+    %cop3 = q.ctrl %op12, %0 : !q.u2, !q.qubit -> !q.cop<1, !q.u2>
+    %ccop0 = "q.ctrl"(%cop0, %2) {operand_segment_sizes = dense<[1, 1, 0, 0, 0, 0, 0]> : vector<7xi32>, static_crange = [], static_range = [], static_range2 = []} : (!q.cop<1, !q.u1>, !q.qureg<4>) -> !q.cop<5, !q.u1>
+    %ccop1 =  q.ctrl %cop0, %2 : !q.cop<1, !q.u1>, !q.qureg<4> -> !q.cop<5, !q.u1>
+    %ccirc0 = "q.ctrl"(%circ0, %0) {operand_segment_sizes = dense<[1, 1, 0, 0, 0, 0, 0]> : vector<7xi32>, static_crange = [], static_range = [], static_range2 = []} : (!q.circ, !q.qubit) -> !q.cop<1, !q.circ>
+    %ccirc1 =  q.ctrl %circ0, %0 : !q.circ, !q.qubit -> !q.cop<1, !q.circ>
+    //q.ctrl %circ0, %0, %1 : !q.circ, !q.qubit, !q.qubit   // can't apply circ by passing qubits
+    //q.ctrl %op0, %2, %2 : !q.u1, !q.qureg<4>, !q.qureg<4> // can't use same qubits for ctrl and trgt
+    //q.ctrl %op0, %2 : !q.u1, !q.qureg<4> -> !q.cop<5>               // # controls mismatch
+    //q.ctrl %ccop0, %2 : !q.cop<5, !q.u1>, !q.qureg<4> -> !q.cop<3>  // # total controls mismatch
+    //q.ctrl %op0, %0 : !q.u1, !q.qubit -> !q.cop<1, !q.circ>         // wrong base type
+    //q.ctrl %op0, %0 : !q.u1, !q.qubit -> !q.u2                      // must provide base type
+    //q.ctrl %cop0, %0 : !q.cop<1, !q.u1>, !q.qubit -> !q.cop<1, !q.cop<1, !q.u1>> // can't use cop as base type
+    //q.ctrl %cop0, %0 : !q.cop<1, !q.u1>, !q.qubit -> !q.cop<2, !q.circ>          // must preserve base type
+    //"q.ctrl"(%op12, %0, %2) {operand_segment_sizes = dense<[1, 1, 0, 0, 0, 1, 0]> : vector<7xi32>, static_crange = [], static_range = [], static_range2 = []} : (!q.u2, !q.qubit, !q.qureg<4>) -> ()
+    //q.ctrl %op0, %0, %1, %2 : !q.u1, !q.qubit, !q.qubit, !q.qureg<4> // can't second argument for u1
+    //q.ctrl %op12, %0, %1 : !q.u2, !q.qubit, !q.qubit // need second argument for u2
 
-    q.c %op0, %0, %2[2] : !q.u1, !q.qubit, !q.qureg<4>
-    q.c %op0, %0, %2[%a,%b] : !q.u1, !q.qubit, !q.qureg<4>
-    q.c %op0, %0, %2[1,%b,2] : !q.u1, !q.qubit, !q.qureg<4>
-    q.c %op0, %2[0], %2[1,3] : !q.u1, !q.qureg<4>, !q.qureg<4>
-    //q.c %op0, %0[1], %2[1,%b,2] : !q.u1, !q.qubit, !q.qureg<4>  // illegal on anything but qureg
-    //q.c %op0, %2[1,%b,2], %0[%s] : !q.u1, !q.qureg<4>, !q.qubit // illegal on anything but qureg
+    q.ctrl %op0, %0, %2[2] : !q.u1, !q.qubit, !q.qureg<4>
+    q.ctrl %op0, %0, %2[%a,%b] : !q.u1, !q.qubit, !q.qureg<4>
+    q.ctrl %op0, %0, %2[1,%b,2] : !q.u1, !q.qubit, !q.qureg<4>
+    q.ctrl %op0, %2[0], %2[1,3] : !q.u1, !q.qureg<4>, !q.qureg<4>
+    //q.ctrl %op0, %0[1], %2[1,%b,2] : !q.u1, !q.qubit, !q.qureg<4>  // illegal on anything but qureg
+    //q.ctrl %op0, %2[1,%b,2], %0[%s] : !q.u1, !q.qureg<4>, !q.qubit // illegal on anything but qureg
 
 
     // test adjoint meta operation
-    "q.adj"(%op0, %0) {operand_segment_sizes = dense<[1, 1, 0]> : vector<3xi32>, static_range = []} : (!q.u1, !q.qubit) -> ()
+    "q.adj"(%op0, %0) {operand_segment_sizes = dense<[1, 1, 0, 0, 0]> : vector<5xi32>, static_range = [], static_range2 = []} : (!q.u1, !q.qubit) -> ()
     q.adj %op0, %0 : !q.u1, !q.qubit
-    "q.adj"(%cop0, %0) {operand_segment_sizes = dense<[1, 1, 0]> : vector<3xi32>, static_range = []} : (!q.cop<1, !q.u1>, !q.qubit) -> ()
+    "q.adj"(%cop0, %0) {operand_segment_sizes = dense<[1, 1, 0, 0, 0]> : vector<5xi32>, static_range = [], static_range2 = []} : (!q.cop<1, !q.u1>, !q.qubit) -> ()
     q.adj %cop0, %0 : !q.cop<1, !q.u1>, !q.qubit
-    %aop0 = "q.adj"(%op0) {operand_segment_sizes = dense<[1, 0, 0]> : vector<3xi32>, static_range = []} : (!q.u1) -> !q.u1
+    %aop0 = "q.adj"(%op0) {operand_segment_sizes = dense<[1, 0, 0, 0, 0]> : vector<5xi32>, static_range = [], static_range2 = []} : (!q.u1) -> !q.u1
     %aop1 = q.adj %op0 : !q.u1 -> !q.u1
-    %acirc0 = "q.adj"(%circ0) {operand_segment_sizes = dense<[1, 0, 0]> : vector<3xi32>, static_range = []} : (!q.circ) -> !q.circ
+    %acirc0 = "q.adj"(%circ0) {operand_segment_sizes = dense<[1, 0, 0, 0, 0]> : vector<5xi32>, static_range = [], static_range2 = []} : (!q.circ) -> !q.circ
     %acirc1 = q.adj %circ0 : !q.circ -> !q.circ
-    %acop0 = "q.adj"(%cop0) {operand_segment_sizes = dense<[1, 0, 0]> : vector<3xi32>, static_range = []} : (!q.cop<1, !q.u1>) -> !q.cop<1, !q.u1>
+    %acop0 = "q.adj"(%cop0) {operand_segment_sizes = dense<[1, 0, 0, 0, 0]> : vector<5xi32>, static_range = [], static_range2 = []} : (!q.cop<1, !q.u1>) -> !q.cop<1, !q.u1>
     %acop1 = q.adj %cop0 : !q.cop<1, !q.u1> -> !q.cop<1, !q.u1>
     //q.adj %op0 : !q.u1 -> !q.cop<1, !q.u1> // input and output must be the same type
     //q.adj %circ0, %0 : !q.circ, !q.qubit   // circ can't be applied by specifying qubits
+    //"q.adj"(%op12, %2) {operand_segment_sizes = dense<[1, 0, 0, 1, 0]> : vector<5xi32>, static_range = [], static_range2 = []} : (!q.u2, !q.qureg<4>) -> ()
+    //q.adj %op0, %1, %2 : !q.u1, !q.qubit, !q.qureg<4> // can't second argument for u1
+    //q.adj %op12, %1 : !q.u2, !q.qubit // need second argument for u2
 
     q.adj %op0, %2[2] : !q.u1, !q.qureg<4>
     q.adj %op0, %2[%a,%b] : !q.u1, !q.qureg<4>

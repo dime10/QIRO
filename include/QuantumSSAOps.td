@@ -3,6 +3,7 @@
 
 include "QuantumSSADialect.td"
 include "mlir/IR/SymbolInterfaces.td"
+include "mlir/Interfaces/SideEffectInterfaces.td"
 include "mlir/Interfaces/CallInterfaces.td"
 
 // Base class for "gates", i.e. operations executable on a quantum computer
@@ -34,7 +35,7 @@ class QuantumSSA_Gate<string mnemonic, list<OpTrait> traits = []> : QuantumSSA_O
     }];
 }
 
-def AllocQbOp : QuantumSSA_Op<"alloc"> {
+def AllocOp : QuantumSSA_Op<"alloc", [NoSideEffect]> {
     let summary = "Allocate a qubit (state).";
     let description = [{
         The allocation command registers a new qubit with the system, which
@@ -61,7 +62,7 @@ def AllocQbOp : QuantumSSA_Op<"alloc"> {
     }];
 }
 
-def AllocRegOp : QuantumSSA_Op<"allocreg"> {
+def AllocRegOp : QuantumSSA_Op<"allocreg", [NoSideEffect]> {
     let summary = "Allocate a qubit register (state).";
     let description = [{
         This allocation command registers a new qubit register with the system,
@@ -106,11 +107,11 @@ def AllocRegOp : QuantumSSA_Op<"allocreg"> {
     }];
 
     let assemblyFormat = [{
-        `(` ($static_size^ `)`)? ($size^ `)` `:` type($size))? `->` type(results) attr-dict
+        `(` custom<IntParam>($size, type($size), $static_size) `)` attr-dict `->` type(results)
     }];
 }
 
-def HOp : QuantumSSA_Gate<"H", [Unitary, Hermitian]> {
+def HOp : QuantumSSA_Gate<"H", [Unitary, Hermitian, NoSideEffect]> {
     let summary = "Hadamard gate.";
     let description = [{
         The Hadamard gate is a single Qubit (hermitian) unitary.
@@ -129,11 +130,11 @@ def HOp : QuantumSSA_Gate<"H", [Unitary, Hermitian]> {
         %0 = "qs.alloc"() : () -> !qs.qstate
         %1 = "qs.allocreg"() {size=4} : () -> !qs.rstate<4>
         // Apply a Hadamard gate to qubit %0
-        "qs.H"(%0) : (!qs.qstate) -> ()
+        "qs.H"(%0) : (!qs.qstate) -> !qs.qstate
         // Apply a Hadamard gate to each qubit in register %1
-        "qs.H"(%1) : (!qs.rstate<4>) -> ()
+        "qs.H"(%1) : (!qs.rstate<4>) -> !qs.rstate<4>
         // OR in custom assembly format
-        qs.H %1 : !qs.rstate<4>
+        qs.H %1 : !qs.rstate<4> -> !qs.rstate<4>
         // Generate Hadamard op without application to qubits (to be manipulated via meta-ops)
         $op = "qs.H"() : () -> !qs.u1
         // OR in custom assembly format
@@ -154,7 +155,7 @@ def HOp : QuantumSSA_Gate<"H", [Unitary, Hermitian]> {
     }];
 }
 
-def XOp : QuantumSSA_Gate<"X", [Unitary, Hermitian]> {
+def XOp : QuantumSSA_Gate<"X", [Unitary, Hermitian, NoSideEffect]> {
     let summary = "NOT gate.";
     let description = [{
         The NOT gate is a single Qubit (hermitian) unitary.
@@ -173,11 +174,11 @@ def XOp : QuantumSSA_Gate<"X", [Unitary, Hermitian]> {
         %0 = "qs.alloc"() : () -> !qs.qstate
         %1 = "qs.allocreg"() {size=4} : () -> !qs.rstate<4>
         // Apply a NOT gate to qubit %0
-        "qs.X"(%0) : (!qs.qstate) -> ()
+        "qs.X"(%0) : (!qs.qstate) -> !qs.qstate
         // Apply a NOT gate to each qubit in register %1
-        "qs.X"(%1) : (!qs.rstate<4>) -> ()
+        "qs.X"(%1) : (!qs.rstate<4>) -> !qs.rstate<4>
         // OR in custom assembly format
-        qs.X %1 : !qs.rstate<4>
+        qs.X %1 : !qs.rstate<4> -> !qs.rstate<4>
         // Generate NOT op without application to qubits (to be manipulated via meta-ops)
         $op = "qs.X"() : () -> !qs.u1
         // OR in custom assembly format
@@ -198,7 +199,7 @@ def XOp : QuantumSSA_Gate<"X", [Unitary, Hermitian]> {
     }];
 }
 
-def RzOp : QuantumSSA_Gate<"RZ", [Unitary]> {
+def RzOp : QuantumSSA_Gate<"RZ", [Unitary, NoSideEffect]> {
     let summary = "Z-Rotation gate.";
     let description = [{
         The Rz gate is a single Qubit unitary.
@@ -217,16 +218,17 @@ def RzOp : QuantumSSA_Gate<"RZ", [Unitary]> {
         ```mlir
         %0 = "q.alloc"() : () -> !qs.qstate
         %1 = "q.allocreg"() {size=4} : () -> !qs.rstate<4>
+        %phi = constant 0.1 : f64
         // Apply a z-rotation by angle 0.1 to qubit %0
-        "qs.RZ"(%0) {phi=0.1}: (!qs.qstate) -> ()
+        "qs.RZ"(%phi, %0) : (f64, !qs.qstate) -> !qs.qstate
         // Apply a z-rotation by angle 0.1 to each qubit in register %1
-        "qs.RZ"(%1) {phi=0.1} : (!qs.rstate<4>) -> ()
+        "qs.RZ"(%phi, %1) : (f64, !qs.rstate<4>) -> !qs.rstate<4>
         // OR in custom assembly format
-        qs.RZ(0.1) %1 : !qs.rstate<4>
+        qs.RZ(%phi) %1 : f64, !qs.rstate<4> -> !qs.rstate<4>
         // Generate RZ gate without application to qubits (to be manipulated via meta-ops)
-        $op = "qs.RZ"() {phi=0.1} : () -> !qs.u1
+        $op = "qs.RZ"(%phi) : (f64) -> !qs.u1
         // OR in custom assembly format
-        %op = qs.RZ(0.1) -> !qs.u1
+        %op = qs.RZ(%phi) : f64 -> !qs.u1
         ```
     }];
 
@@ -244,7 +246,7 @@ def RzOp : QuantumSSA_Gate<"RZ", [Unitary]> {
     }];
 }
 
-def ROp : QuantumSSA_Gate<"R", [Unitary]> {
+def ROp : QuantumSSA_Gate<"R", [Unitary, NoSideEffect]> {
     let summary = "Rotation gate.";
     let description = [{
         The R gate is a single Qubit unitary.
@@ -256,6 +258,24 @@ def ROp : QuantumSSA_Gate<"R", [Unitary]> {
         This operation takes a qubit or register state as input and returns an
         updated state. The parameter φ is mandatory and must be provided as an
         operand. Alternatively, if no target is provided, the operation is returned.
+
+        Example:
+
+        ```mlir
+        %0 = "q.alloc"() : () -> !qs.qstate
+        %1 = "q.allocreg"() {size=4} : () -> !qs.rstate<4>
+        %phi = constant 0.1 : f64
+        // Apply a rotation by angle 0.1 to qubit %0
+        "qs.R"(%phi, %0) : (f64, !qs.qstate) -> !qs.qstate
+        // Apply a z-rotation by angle 0.1 to each qubit in register %1
+        "qs.R"(%phi, %1) : (f64, !qs.rstate<4>) -> !qs.rstate<4>
+        // OR in custom assembly format
+        qs.R(%phi) %1 : f64, !qs.rstate<4> -> !qs.rstate<4>
+        // Generate R gate without application to qubits (to be manipulated via meta-ops)
+        $op = "qs.R"(%phi) : (f64) -> !qs.u1
+        // OR in custom assembly format
+        %op = qs.R(%phi) : f64 -> !qs.u1
+        ```
     }];
 
     let arguments = (ins
@@ -272,7 +292,7 @@ def ROp : QuantumSSA_Gate<"R", [Unitary]> {
     }];
 }
 
-def CNotOp : QuantumSSA_Gate<"CX", [Unitary, Hermitian]> {
+def CNotOp : QuantumSSA_Gate<"CX", [Unitary, Hermitian, NoSideEffect, AttrSizedOperandSegments]> {
     let summary = "CNOT gate.";
     let description = [{
         The CNOT gate is a two Qubit (hermitian) unitary.
@@ -296,41 +316,48 @@ def CNotOp : QuantumSSA_Gate<"CX", [Unitary, Hermitian]> {
         %1 = "qs.alloc"() : () -> !qs.qstate
         %2 = "qs.allocreg"() {size=4} : () -> !qs.rstate<4>
         // Apply a CNOT to target %1 and control %0
-        "qs.CX"(%0, %1) : (!qs.qstate, !qs.qstate) -> ()
+        "qs.CX"(%0, %1) : (!qs.qstate, !qs.qstate) -> (!qs.qstate, !qs.qstate)
         // Apply a CNOT with control %0 to each qubit in register %2
-        "qs.CX"(%0, %2) : (!qs.qstate, !qs.rstate<4>) -> ()
+        "qs.CX"(%0, %2) : (!qs.qstate, !qs.rstate<4>) -> (!qs.qstate, !qs.rstate<4>)
         // OR in custom assembly format
-        qs.CX %0, %2 : !qs.qstate, !qs.rstate<4>
+        qs.CX %0, %2 : !qs.qstate, !qs.rstate<4> -> !qs.qstate, !qs.rstate<4>
         // Generate CNOT gate without application to qubits (to be manipulated via meta-ops)
-        $op = "qs.CX"(%0) : (!qs.qstate) -> !qs.u2
+        $op = "qs.CX"() : () -> !qs.u2
         // OR in custom assembly format
-        $op = qs.CX %0 : !qs.qstate -> !qs.u2
+        $op = qs.CX -> !qs.u2
         ```
     }];
 
     let arguments = (ins
-        Qstate_Type : $ctrl,
+        Optional<Qstate_Type> : $ctrl,
         Optional<QData_Type> : $qbs
     );
 
     let results = (outs
+        Optional<Qstate_Type> : $new_ctrl,
         AnyTypeOf<[QData_Type, U2_Type]> : $res
     );
 
     let additionalVerifier = [{
-        // check that target and control are not the same
-        if (this->qbs() && this->qbs() == this->ctrl()) {
-            return this->emitOpError() << "can't use the same value as control AND target!";
-        }
+        auto res = this->res().getType();
+
+        if (this->ctrl() && !this->qbs() || !this->ctrl() && this->qbs())
+            return this->emitOpError() << "accepts either both control and target or neither!";
+
+        if (!res.isa<U2Type>() && !this->new_ctrl() || res.isa<U2Type>() && this->new_ctrl())
+            return this->emitOpError() << "must return either both qb/reg states or neither!";
+
+        if (!res.isa<U2Type>() && this->qbs().getType() != res)
+            return this->emitOpError() << "2nd input qb/reg type must match 2nd output type!";
     }];
 
     let assemblyFormat = [{
-        operands `:` type(operands) `->` type(results) attr-dict
+        ($ctrl^ `,` $qbs `:` type($ctrl) `,` type($qbs))? `->` type(results) attr-dict
     }];
 }
 
 def ReturnStateOp : QuantumSSA_Op<"return", [Terminator]> {
-    let summary = "Return qubit states from a function.";
+    let summary = "Return qubit states from a circuit.";
     let description = [{
         This is a terminator opperation for quantum circuits, which, compared to the
         'quantum' dialect version, is able to return updated qubit states from a circuit
@@ -409,7 +436,7 @@ def CircuitOp : QuantumSSA_Op<"circ", [Symbol, FunctionLike, IsolatedFromAbove, 
     let parser = [{ return ::parse$cppClass(parser, result); }];
 }
 
-def CircuitValueOp : QuantumSSA_Op<"getval"> {
+def CircuitValueOp : QuantumSSA_Op<"getval", [NoSideEffect]> {
     let summary = "Generate an SSA value for a circuit.";
     let description = [{
         Internal operation to generate SSA values of circuits given their
@@ -644,7 +671,7 @@ def ApplyCircOp : QuantumSSA_Op<"apply"> {
     }];
 }
 
-def ControlOp : QuantumSSA_Gate<"c", [Meta]> {
+def ControlOp : QuantumSSA_Gate<"ctrl", [Meta, NoSideEffect, AttrSizedOperandSegments]> {
     let summary = "Control meta-op.";
     let description = [{
         This meta operation transforms a quantum op that has not been applied
@@ -665,11 +692,11 @@ def ControlOp : QuantumSSA_Gate<"c", [Meta]> {
         %2 = "qs.allocreg"() {size=4} : () -> !qs.rstate<4>
         %op = "qs.H"() : () -> !qs.u1
         // Control H op on qubit %0 and apply to qubit %1
-        "qs.ctrl"(%op, %0, %1) : (!qs.u1, !qs.state, !qs.state) -> ()
+        "qs.ctrl"(%op, %0, %1) : (!qs.u1, !qs.state, !qs.state) -> (!qs.state, !qs.state)
         // Control H op on qubit %0 and apply to all qubits in register %2
-        "qs.ctrl"(%op, %0, %2) : (!qs.u1, !qs.state, !qs.rstate<4>) -> ()
+        "qs.ctrl"(%op, %0, %2) : (!qs.u1, !qs.state, !qs.rstate<4>) -> (!qs.state, !qs.rstate<4>)
         // Control H op on all of register %2 and apply to qubit %1
-        "qs.ctrl"(%op, %2, %1) : (!qs.u1, !qs.rstate<4>, !qs.qstate) -> ()
+        "qs.ctrl"(%op, %2, %1) : (!qs.u1, !qs.rstate<4>, !qs.qstate) -> (!qs.rstate<4>, !qs.qstate)
 
         // Control H op on qubit %1 but leave application open
         %cop = "qs.ctrl"(%op, %1) : (!qs.u1, !qs.state) -> !qs.cop<1, !qs.u1>
@@ -680,57 +707,71 @@ def ControlOp : QuantumSSA_Gate<"c", [Meta]> {
     let arguments = (ins
         QOp_Type : $heldOp,
         QData_Type : $ctrls,
+        Optional<Qstate_Type> : $qbs2,
         Optional<QData_Type> : $qbs
     );
 
     let results = (outs
+        QData_Type : $new_ctrls,
+        Optional<Qstate_Type> : $new_qbs2,
         AnyTypeOf<[QData_Type, ControlledOp_Type]> : $res
     );
 
     let additionalVerifier = [{
-        // make sure target and control aren't identical (basic test, not comprehensive)
-        if (this->qbs() && this->qbs() == this->ctrls())
-            return this->emitOpError() << "can't use the same value as control AND target!";
-
         auto heldOp = this->heldOp().getType();
+        auto res = this->res().getType();
+
+        if (this->qbs2() && !this->qbs())
+            return this->emitOpError() << "does not accept 2nd qubit arg without 1st!";
+
+        // check presence of operands depending on heldOp type (u1 vs u2)
+        if (!res.isa<COpType>()) {
+            if (heldOp.isa<U1Type>() && (this->qbs2() || this->new_qbs2()))
+                return this->emitOpError() << "does not accept second qubit arg for U1 op!";
+            if (heldOp.isa<U2Type>() && (!this->qbs2() || !this->new_qbs2()))
+                return this->emitOpError() << "requires second qubit arg for U2 op!";
+        } else {
+            if (this->new_qbs2())
+                return this->emitOpError() << "cannot return 2nd qubit state when returning op!";
+        }
+
         // make sure user is not trying to apply a circuit op by specifying a target
         if (this->qbs() && (heldOp.isa<CircType>() || heldOp.isa<COpType>() &&
-                            heldOp.cast<COpType>().getBaseType() &&
                             heldOp.cast<COpType>().getBaseType().isa<CircType>()))
             return this->emitOpError() << "does not accept target qubits when controlling circuit!";
 
         // obtain total number of control qubits from input
         unsigned totalctrls = 0;
 
+        auto ctrls = this->ctrls().getType();
+        if (ctrls.isa<QstateType>()) {
+            totalctrls++;
+        } else if (auto regType = ctrls.dyn_cast<RstateType>()) {
+            if (auto numQubits = regType.getNumQubits())
+                totalctrls += *numQubits;
+            else
+                totalctrls = -1; // disable # of ctrl qubits check when no size is provided
+        }
+
         if (auto cop = heldOp.dyn_cast<COpType>()) {
             if (auto numCtrls = cop.getNumCtrls())
                 totalctrls += *numCtrls;
             else
-                totalctrls = -1;
-        }
-
-        if (totalctrls != -1) {
-            auto ctrls = this->ctrls().getType();
-            if (ctrls.isa<QstateType>()) {
-                totalctrls++;
-            } else if (auto regType = ctrls.dyn_cast<RstateType>()) {
-                if (auto numQubits = regType.getNumQubits())
-                    totalctrls += *numQubits;
-                else
-                    totalctrls = -1; // disable # of ctrl qubits check when no size is provided
-            } else {
-                assert(false && "Unknown data-type encountered in ControlOp!");
-            }
+                totalctrls = -1; // disable # of ctrl qubits check if base op is 'cop' without #
         }
 
         // perform several checks on the return type, if it is a COpType
-        if (this->res().getType().isa<COpType>()) {
-            COpType output = this->res().getType().cast<COpType>();
+        if (auto output = this->res().getType().dyn_cast<COpType>()) {
             // assert correct number of control qubits
-            if (totalctrls != -1 && output.getNumCtrls() && *output.getNumCtrls() != totalctrls)
-                return this->emitOpError() << "with mismatched number of controls in return type "
-                                              "vs inputs!";
-
+            if (totalctrls != -1) {
+                if (!output.getNumCtrls())
+                    return this->emitOpError() << "requires # ctrl qubits in output if available!";
+                else if (*output.getNumCtrls() != totalctrls)
+                    return this->emitOpError() << "mismatched # of ctrls in return type vs inputs!";
+            } else {
+                if (output.getNumCtrls())
+                    return this->emitOpError() << "unexpected # ctrl qubits in ouput (not verif.)!";
+            }
             // assert proper base type
             if (heldOp.isa<COpType>()) {
                 if (heldOp.cast<COpType>().getBaseType() != output.getBaseType())
@@ -743,11 +784,13 @@ def ControlOp : QuantumSSA_Gate<"c", [Meta]> {
     }];
 
     let assemblyFormat = [{
-        operands `:` type(operands) `->` type(results) attr-dict
+        $heldOp `,` $ctrls
+        custom<OneOrTwoQbs>($qbs2, $qbs)
+        attr-dict `:` type(operands) `->` type(results)
     }];
 }
 
-def AdjointOp : QuantumSSA_Gate<"adj", [Meta]> {
+def AdjointOp : QuantumSSA_Gate<"adj", [Meta, NoSideEffect, AttrSizedOperandSegments]> {
     let summary = "(Hermitian) adjoint meta-op.";
     let description = [{
         This meta operation transforms a quantum op that has not been applied
@@ -767,9 +810,9 @@ def AdjointOp : QuantumSSA_Gate<"adj", [Meta]> {
         %1 = "qs.allocreg"() {size=4} : () -> !qs.rstate<4>
         %op = "qs.H"() : () -> !qs.u1
         // Invert H op and apply to qubit %0
-        "qs.adj"(%op, %0) : (!qs.u1, !qs.qstate) -> ()
+        "qs.adj"(%op, %0) : (!qs.u1, !qs.qstate) -> !qs.qstate
         // Invert H op apply to all qubits in register %1
-        "qs.adj"(%op, %1) : (!qs.u1, !qs.rstate<4>) -> ()
+        "qs.adj"(%op, %1) : (!qs.u1, !qs.rstate<4>) -> !qs.rstate<4>
         // Invert H op but leave application open
         %opdg = "qs.adj"(%op) : (!qs.u1) -> !qs.u1
         // OR in custom assembly format
@@ -778,26 +821,46 @@ def AdjointOp : QuantumSSA_Gate<"adj", [Meta]> {
 
     let arguments = (ins
         QOp_Type : $heldOp,
+        Optional<Qstate_Type> : $qbs2,
         Optional<QData_Type> : $qbs
     );
 
     let results = (outs
+        Optional<Qstate_Type> : $new_qbs2,
         AnyTypeOf<[QData_Type, QOp_Type]> : $res
     );
 
     string additionalVerifier = [{
         auto heldOp = this->heldOp().getType();
-        if (!this->qbs() && heldOp != this->res().getType())
-            return this->emitOpError() << "given operation type must match output type!";
+        auto res = this->res().getType();
+        bool resIsOp = !(res.isa<QstateType>() || res.isa<RstateType>());
+
+        if (this->qbs2() && !this->qbs())
+            return this->emitOpError() << "does not accept 2nd qubit arg without 1st!";
+
+        // check presence of operands depending on heldOp type (u1 vs u2)
+        if (!resIsOp) {
+            if (heldOp.isa<U1Type>() && (this->qbs2() || this->new_qbs2()))
+                return this->emitOpError() << "does not accept second qubit arg for U1 op!";
+            if (heldOp.isa<U2Type>() && (!this->qbs2() || !this->new_qbs2()))
+                return this->emitOpError() << "requires second qubit arg for U2 op!";
+        } else {
+            if (this->new_qbs2())
+                return this->emitOpError() << "cannot return 2nd qubit state when returning op!";
+        }
 
         // make sure user is not trying to apply a circuit op by specifying a target
         if (this->qbs() && (heldOp.isa<CircType>() || heldOp.isa<COpType>() &&
                             heldOp.cast<COpType>().getBaseType().isa<CircType>()))
             return this->emitOpError() << "does not accept target qubits when inverting circuit!";
+
+        // check ouput op type matches input op type
+        if (resIsOp && heldOp != res)
+            return this->emitOpError() << "given operation type must match output type!";
     }];
 
     let assemblyFormat = [{
-        operands `:` type(operands) `->` type(results) attr-dict
+        $heldOp custom<OneOrTwoQbs>($qbs2, $qbs) attr-dict `:` type(operands) `->` type(results)
     }];
 }
 

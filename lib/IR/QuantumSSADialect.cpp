@@ -2,6 +2,7 @@
    e.g. operations, custom types, attributes etc. */
 
 #include "mlir/IR/DialectImplementation.h"
+#include "mlir/IR/AsmState.h"
 #include "mlir/IR/OpDefinition.h"
 #include "mlir/IR/FunctionImplementation.h"
 #include "llvm/ADT/TypeSwitch.h"
@@ -229,7 +230,7 @@ Type QuantumSSADialect::parseCOpType(DialectAsmParser &parser) {
 
 
 //===------------------------------------------------------------------------------------------===//
-// Custom assembly format for quantum operations
+// Custom parsing for special operations types
 //===------------------------------------------------------------------------------------------===//
 
 // custom printing for the function-like CircuitOp
@@ -259,6 +260,68 @@ static ParseResult parseCircuitOp(OpAsmParser &p, OperationState &result) {
     return success();
 }
 
+
+//===------------------------------------------------------------------------------------------===//
+// Custom directives for declarative op printing and parsing
+//===------------------------------------------------------------------------------------------===//
+
+// custom directive to print one or two optional operands
+static void printOneOrTwoQbs(OpAsmPrinter &p, Value qbs2, Value qbs) {
+    if (qbs)
+        p << ", ";
+    if (qbs2) {
+        p.printOperand(qbs2);
+        p << ", ";
+    }
+    if (qbs)
+        p.printOperand(qbs);
+}
+
+// custom directive to parse one or two optional operands
+static ParseResult parseOneOrTwoQbs(OpAsmParser &p,
+                                    Optional<OpAsmParser::OperandType> &qbs2,
+                                    Optional<OpAsmParser::OperandType> &qbs) {
+    if (failed(p.parseOptionalComma()))
+        return success();
+
+    OpAsmParser::OperandType operand;
+    if (p.parseOperand(operand))
+        return EMIT_ERROR(p, "expected operand after comma!");
+    if (succeeded(p.parseOptionalComma())) {
+        qbs2 = operand;
+        if (p.parseOperand(operand))
+            return EMIT_ERROR(p, "expected operand after comma!");
+    }
+    qbs = operand;
+
+    return success();
+}
+
+// custom directive to print a integer parameter
+static void printIntParam(OpAsmPrinter &p, Value dynArg, Type, Attribute staticArg) {
+    if (dynArg)
+        p.printOperand(dynArg);
+    if (staticArg)
+        p.printAttributeWithoutType(staticArg);
+}
+
+// custom directive to parse a integer parameter
+static ParseResult parseIntParam(OpAsmParser &p,
+                                 Optional<OpAsmParser::OperandType> &dynArg, Type &dynType,
+                                 Attribute &staticArg) {
+    OpAsmParser::OperandType operand;
+    auto res = p.parseOptionalOperand(operand);
+    if (res.hasValue() && failed(res.getValue())) {
+        return EMIT_ERROR(p, "unexpected failure for optional operand!");
+    } else if (res.hasValue()) {
+        dynArg = operand;
+        dynType = p.getBuilder().getIndexType();
+    } else if (p.parseAttribute(staticArg, p.getBuilder().getI64Type())) {
+        return EMIT_ERROR(p, "expected integer parameter!");
+    }
+
+    return success();
+}
 
 //===------------------------------------------------------------------------------------------===//
 // Additional op method definitions

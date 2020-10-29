@@ -234,7 +234,7 @@ Type QuantumDialect::parseCOpType(DialectAsmParser &parser) {
 
 
 //===------------------------------------------------------------------------------------------===//
-// Custom parsing for special operations types printing and parsing
+// Custom parsing for special operations types
 //===------------------------------------------------------------------------------------------===//
 
 // custom printing for the function-like CircuitOp
@@ -270,365 +270,398 @@ static ParseResult parseCircuitOp(OpAsmParser &p, OperationState &result) {
 
 
 //===------------------------------------------------------------------------------------------===//
-// Static parse helper methods for the register access interface
+// Custom directives for declarative op printing and parsing
 //===------------------------------------------------------------------------------------------===//
 
-// Parse a list of register range indeces (accessors) that can be either SSA values of type Index
-// or some constant integer attribute.
-static ParseResult parseOperandOrIntAttrList(OpAsmParser &parser, ArrayAttr &accessors,
-        int64_t dynVal, SmallVectorImpl<OpAsmParser::OperandType> &ssa) {
+// custom directive to print single register accessor list
+static void printSingleAccessorList(OpAsmPrinter &p,
+                                    OperandRange range, TypeRange, ArrayAttr staticRange) {
+    if (!staticRange.size())
+        return;
 
-    Builder builder = parser.getBuilder();
+    p << "[";
+    int opIdx = 0;
+    const char *sep = "";
+    for (auto attr : staticRange) {
+        p << sep;
+        if (attr.dyn_cast<IntegerAttr>().getInt() == -1)
+            p.printOperand(range[opIdx++]);
+        else
+            p.printAttributeWithoutType(attr);
+        sep = ", ";
+    }
+    p << "]";
+}
 
-    if (failed(parser.parseOptionalLSquare())) {
-        accessors = builder.getI64ArrayAttr({});
+// custom directive to parse single register accessor list
+static ParseResult parseSingleAccessorList(OpAsmParser &p,
+                                           SmallVectorImpl<OpAsmParser::OperandType> &range,
+                                           SmallVectorImpl<Type> &types, ArrayAttr &staticRange) {
+    Builder builder = p.getBuilder();
+    if(failed(p.parseOptionalLSquare())) {
+        staticRange = builder.getI64ArrayAttr({});
         return success();
     }
 
-    // there are atmost 3 range accessors to parse: start, size, step
-    SmallVector<int64_t, 3> attrVals;
-    for (unsigned i = 0; i < 3; i++) {
+    // Maximum 3 register accessors: start, size, step. Either index operands or int attributes.
+    SmallVector<int64_t, 3> staticRangeValues;
+    do {
         OpAsmParser::OperandType operand;
-        auto res = parser.parseOptionalOperand(operand);
-        if (res.hasValue() && succeeded(res.getValue())) {
-            ssa.push_back(operand);
-            attrVals.push_back(dynVal);
+        auto res = p.parseOptionalOperand(operand);
+        if (res.hasValue() && failed(res.getValue())) {
+            return EMIT_ERROR(p, "unexpected failure for optional operand");
+        } else if (res.hasValue()) {
+            range.push_back(operand);
+            types.push_back(builder.getIndexType());
+            staticRangeValues.push_back(-1);
         } else {
             Attribute attr;
-            NamedAttrList placeholder;
-            if (failed(parser.parseAttribute(attr, "_", placeholder)) || !attr.isa<IntegerAttr>())
-                return parser.emitError(parser.getNameLoc()) << "expected SSA value or integer";
-            attrVals.push_back(attr.cast<IntegerAttr>().getInt());
-        }
-
-        if (succeeded(parser.parseOptionalComma()))
-            continue;
-        if (failed(parser.parseRSquare()))
-            return failure();
-        else
-            break;
-    }
-
-    accessors = builder.getI64ArrayAttr(attrVals);
-    return success();
-}
-
-// Parse any operands and add them to the allOperands list. If any of them are of qureg type,
-// additionally try to parse a register accessor list. For every such operand, we also need to
-// populate the corresponding array attribute that specifies how many (if any) accessors are
-// constants. Get the attribute names from the interface method.
-// Also populate the 'getOperandSegmentSizeAttr' for multiple variadic operands ops.
-template<typename OpClass>
-static ParseResult parseOperandListWithAccessors(OpAsmParser &parser, OperationState &result,
-        SmallVectorImpl<OpAsmParser::OperandType> &allOperands,
-        SmallVectorImpl<Type> &allOperandTypes, SmallVectorImpl<int> &segmentSizes,
-        unsigned &parsed) {
-    Builder b = parser.getBuilder();
-    ArrayRef<bool> isRegLike;
-    unsigned numRegLike, currRegLike = 0;
-    std::tie(isRegLike, numRegLike) = OpClass::getRegLikeArray();
-
-    unsigned totalParsed = parsed, origParsed = parsed;
-    do {
-        OpAsmParser::OperandType currentOperand;
-        auto res = parser.parseOptionalOperand(currentOperand);
-        if (res.hasValue()) {
-            if (failed(res.getValue()))
-                return failure();
-
-            allOperands.push_back(currentOperand);
-            allOperandTypes.push_back(nullptr);
-            segmentSizes[totalParsed++] = 1;
-
-            if (isRegLike[parsed]) {
-                SmallVector<OpAsmParser::OperandType, 3> ssaAccessors;
-                ArrayAttr staticAccessors;
-                if (parseOperandOrIntAttrList(parser, staticAccessors, ShapedType::kDynamicSize,
-                                              ssaAccessors))
-                    return failure();
-                // populates the static range attribute array
-                result.addAttribute(OpClass::getAccessorAttrName(currRegLike++), staticAccessors);
-                allOperands.append(ssaAccessors.begin(), ssaAccessors.end());
-                allOperandTypes.append(ssaAccessors.size(), b.getIndexType());
-                segmentSizes[totalParsed++] = ssaAccessors.size();
-            }
-
-            parsed++;
-        }
-    } while (succeeded(parser.parseOptionalComma()));
-    // fill the static accessor array attributes for non-parsed operands with empty arrays
-    while (currRegLike < numRegLike)
-        result.addAttribute(OpClass::getAccessorAttrName(currRegLike++), b.getI64ArrayAttr({}));
-    // return the number of (non-accessor) operands that were parsed here
-    parsed -= origParsed;
-    return success();
-}
-
-// This is a variation of the 'parseOperandListWithAccessors' function which parses a mixed list
-// of operands (args) of which some have register accessors (ranges, staticRangesVec).
-// Additionally, it can also parse integer constants (sizeParamsVec) interspersed between the
-// operands.
-static ParseResult parseMixedOperandsAccessorsConstants(OpAsmParser &p,
-        SmallVectorImpl<OpAsmParser::OperandType> &args,
-        SmallVectorImpl<OpAsmParser::OperandType> &ranges,
-        SmallVectorImpl<Attribute> &staticRangesVec,
-        SmallVectorImpl<Attribute> &sizeParamsVec,
-        int &parsedOperands, int &parsedAccessors) {
-
-    Builder b = p.getBuilder();
-
-    parsedOperands = parsedAccessors = 0;
-    do {
-        OpAsmParser::OperandType currentOperand;
-        auto res = p.parseOptionalOperand(currentOperand);
-        if (res.hasValue()){
-            if (failed(res.getValue()))
-                return failure();
-
-            args.push_back(currentOperand);
-            parsedOperands++;
-
-            SmallVector<OpAsmParser::OperandType, 3> ssaAccessors;
-            ArrayAttr staticAccessors;
-            if (parseOperandOrIntAttrList(p, staticAccessors, ShapedType::kDynamicSize, ssaAccessors))
-                return failure();
-            ranges.append(ssaAccessors.begin(), ssaAccessors.end());
-            staticRangesVec.push_back(staticAccessors);
-            parsedAccessors += ssaAccessors.size();
-            sizeParamsVec.push_back(b.getI64IntegerAttr(-1));
-        } else {
-            IntegerAttr sizeParam;
-            if (p.parseAttribute<IntegerAttr>(sizeParam))
-                return failure();
-            sizeParamsVec.push_back(sizeParam);
+            if (failed(p.parseAttribute(attr, builder.getI64Type())))
+                return EMIT_ERROR(p, "expected SSA value or integer");
+            staticRangeValues.push_back(attr.cast<IntegerAttr>().getInt());
         }
     } while (succeeded(p.parseOptionalComma()));
 
+    staticRange = builder.getI64ArrayAttr(staticRangeValues);
+
+    return p.parseRSquare();
+}
+
+// custom directive to print a quatum argument with register accessors
+static void printQDataArg(OpAsmPrinter &p,
+                          Value qbs, OperandRange range, TypeRange, ArrayAttr staticRange) {
+    p.printOperand(qbs);
+    printSingleAccessorList(p, range, nullptr, staticRange);
+}
+
+// custom directive to parse a quatum argument with register accessors
+static ParseResult parseQDataArg(OpAsmParser &p,
+                                 OpAsmParser::OperandType &qbs,
+                                 SmallVectorImpl<OpAsmParser::OperandType> &range,
+                                 SmallVectorImpl<Type> &types, ArrayAttr &staticRange) {
+    if (p.parseOperand(qbs) || parseSingleAccessorList(p, range, types, staticRange))
+        return EMIT_ERROR(p, "expected operand with potential accessors!");
+
     return success();
 }
 
-
-//===------------------------------------------------------------------------------------------===//
-// Custom assembly format for quantum operations
-//===------------------------------------------------------------------------------------------===//
-
-// Templated print function that handles all ops with the register access interface
-template<typename OpClass> static void print(OpAsmPrinter &p, OpClass op) {
-    SmallVector<StringRef, 3> elidedAttrs;
-    ArrayRef<bool> isRegLikeValues = op.getRegLikeArray().first;
-    ArrayRef<bool> isRegLikeTypes = op.getRegLikeArray().first;
-    unsigned start = 0;
-
-    p << op.getOperationName();
-
-    // In case of rotation gates, print the angle parameter
-    if (std::is_same<OpClass, RzOp>::value || std::is_same<OpClass, ROp>::value) {
-        p << "(";
-        if (op.getNumOperands() && op.getOperand(0).getType().isa<FloatType>()) {
-            p.printOperand(op.getOperand(0));
-            start++;
-        } else {
-            p.printAttributeWithoutType(op.getAttrOfType<FloatAttr>("static_phi"));
-            isRegLikeTypes = isRegLikeTypes.drop_front(1);
-        }
-        p << ")";
-        elidedAttrs.push_back("static_phi");
-        isRegLikeValues = isRegLikeValues.drop_front(1);
+// custom directive to print an optional quatum argument with register accessors
+static void printOptionalQDataArg(OpAsmPrinter &p,
+                                  Value qbs, OperandRange range, TypeRange, ArrayAttr staticRange) {
+    if (qbs) {
+        printQDataArg(p, qbs, range, nullptr, staticRange);
     }
-
-    // print all operands, including any register indeces in brackets
-    for (unsigned totIdx = start, argIdx = 0, reglikeIdx = 0; totIdx < op.getOperands().size();) {
-        p << " ";
-        p.printOperand(op.getOperand(totIdx++));
-
-        if (isRegLikeValues[argIdx++]) {
-            ArrayAttr array = op.getAttrOfType<ArrayAttr>(op.getAccessorAttrName(reglikeIdx++));
-            if (array.size())
-                p << "[";
-            const char *sep = "";
-            for (auto attr : array) {
-                p << sep;
-                if (attr.dyn_cast<IntegerAttr>().getInt() == -1)
-                    p.printOperand(op.getOperand(totIdx++));
-                else
-                    p.printAttributeWithoutType(attr);
-                sep = ", ";
-            }
-            if (array.size())
-                p << "]";
-        }
-    }
-
-    // print the attribute dictionary excluding any attributes used by the register access interface
-    elidedAttrs.push_back(op.getOperandSegmentSizeAttr());
-    for (auto attrName : op.getAccessorAttrNames())
-        elidedAttrs.push_back(attrName);
-    p.printOptionalAttrDict(op.getAttrs(), /*elidedAttrs=*/elidedAttrs);
-
-    // print the operand types except those that are register indeces
-    const char *sep = "";
-    if (op.getOperands().size())
-        p << " : ";
-    for (unsigned totIdx = 0, argIdx = 0, reglikeIdx = 0; totIdx < op.getOperands().size();) {
-        p << sep;
-        p.printType(op.getOperand(totIdx++).getType());
-        if (isRegLikeTypes[argIdx++]) {
-            ArrayAttr array = op.getAttrOfType<ArrayAttr>(op.getAccessorAttrName(reglikeIdx++));
-            for (auto attr : array) {
-                // loop past the accessor operands
-                if (attr.dyn_cast<IntegerAttr>().getInt() == -1)
-                    totIdx++;
-            }
-        }
-        sep = ", ";
-    }
-
-    // print all result types
-    p.printOptionalArrowTypeList(op.getOperation()->getResultTypes());
 }
 
-// This parse function can be used with all quantum ops that implement the RegAccessInterface.
-// It parses all available operands and their types in the pretty parse format of quantum gates,
-// with the addition of allowing a list of accessors indeces (Index value OR integer constant)
-// for each of the operands of type 'qureg'. Note that the type of the indeces (if given as SSA
-// value) must not be specified, and is assumed to be IndexType.
-template<typename OpClass>
-static ParseResult parseRegAccessOps(OpAsmParser &p, OperationState &result) {
-    // The most operands a gate can have is: heldOp (1), ctrl (1+3), trgt (1+3) = 9
-    SmallVector<OpAsmParser::OperandType, 9> allOperands;
-    SmallVector<Type, 9> allOperandTypes;
-    SmallVector<Type, 3> nonAccessorOperandTypes;
-    SmallVector<Type, 1> allReturnTypes;
-    SmallVector<int, 5> segmentSizes(OpClass::getSegmentSizesArraySize(), 0);
-    unsigned numMissingTypes = 0, parsed = 0;
-    Builder b = p.getBuilder();
-
-    if (std::is_same<OpClass, RzOp>::value || std::is_same<OpClass, ROp>::value) {
-        FloatAttr phiAttr;
-        OpAsmParser::OperandType phiVal;
-        if (p.parseLParen())
+// custom directive to parse an optional quatum argument with register accessors
+static ParseResult parseOptionalQDataArg(OpAsmParser &p,
+                                         Optional<OpAsmParser::OperandType> &qbs,
+                                         SmallVectorImpl<OpAsmParser::OperandType> &range,
+                                         SmallVectorImpl<Type> &types, ArrayAttr &staticRange) {
+    OpAsmParser::OperandType operand;
+    auto res = p.parseOptionalOperand(operand);
+    if (res.hasValue() && failed(res.getValue())) {
+        return EMIT_ERROR(p, "unexpected failure for optional operand");
+    } else if (res.hasValue()) {
+        qbs = operand;
+        if (parseSingleAccessorList(p, range, types, staticRange))
             return failure();
-        auto res = p.parseOptionalAttribute(phiAttr, "static_phi", result.attributes);
-        if (res.hasValue() && failed(res.getValue()))
-            return failure();
-        res = p.parseOptionalOperand(phiVal);
-        if (res.hasValue()) {
-            if (failed(res.getValue()))
-                return failure();
-            allOperands.push_back(phiVal);
-            allOperandTypes.push_back(nullptr);
-            segmentSizes[0] = 1;
-            numMissingTypes++;
-        }
-        if (p.parseRParen())
-            return failure();
-        // for remainder of parsing, skip first element in regLike array, as it has been parsed now
-        parsed++;
-    }
-
-    llvm::SMLoc allOperandLoc = p.getCurrentLocation();
-    if (parseOperandListWithAccessors<OpClass>(p, result, allOperands, allOperandTypes,
-                                               segmentSizes, parsed))
-        return failure();
-    result.addAttribute(OpClass::getOperandSegmentSizeAttr(), b.getI32VectorAttr(segmentSizes));
-    numMissingTypes += parsed;
-
-    if (p.parseOptionalAttrDict(result.attributes))
-        return failure();
-
-    llvm::SMLoc loc = p.getCurrentLocation();
-    if (succeeded(p.parseOptionalColon()) && p.parseTypeList(nonAccessorOperandTypes))
-        return failure();
-
-    if (numMissingTypes != nonAccessorOperandTypes.size())
-        return p.emitError(loc, "number of provided operand types "
-                                "(" + std::to_string(nonAccessorOperandTypes.size()) + ")"
-                                " doesn't match expected "
-                                "(" + std::to_string(numMissingTypes) + ")");
-
-    for (unsigned i = 0, j = 0; i < allOperandTypes.size(); i++) {
-        if(!allOperandTypes[i])
-            allOperandTypes[i] = nonAccessorOperandTypes[j++];
-    }
-
-    if (p.resolveOperands(allOperands, allOperandTypes, allOperandLoc, result.operands))
-        return failure();
-
-    // parse optional return type
-    if (succeeded(p.parseOptionalArrow())) {
-        if (p.parseTypeList(allReturnTypes))
-            return failure();
-        result.addTypes(allReturnTypes);
+    } else {
+        staticRange = p.getBuilder().getI64ArrayAttr({});
     }
 
     return success();
 }
 
-// custom directive to print the ApplyCircOp
-static void printApplyArgs(OpAsmPrinter &p, OperandRange args, OperandRange ranges,
-                           TypeRange rangeTypes, ArrayAttr staticRanges,
-                           ArrayAttr sizeParams) {
-    const char *sep = "";
-    for (int argIdx = 0, rangeIdx = 0, sizeIdx = 0; argIdx < args.size(); argIdx++) {
-        p << sep;
+// custom directive to print two optional quatum arguments with register accessors
+static void printTwoQDataArg(OpAsmPrinter &p,
+                             Value qbs1, OperandRange range1, TypeRange, ArrayAttr staticRange1,
+                             Value qbs2, OperandRange range2, TypeRange, ArrayAttr staticRange2) {
+    printOptionalQDataArg(p, qbs1, range1, nullptr, staticRange1);
+    if (qbs1 && qbs2)
+        p << ", ";
+    printOptionalQDataArg(p, qbs2, range2, nullptr, staticRange2);
+}
 
-        if (sizeParams.size() && sizeParams[sizeIdx].cast<IntegerAttr>().getInt() != -1) {
-            p.printAttributeWithoutType(sizeParams[sizeIdx++]);
+// custom directive to parse two optional quatum arguments with register accessors
+static ParseResult parseTwoQDataArg(OpAsmParser &p,
+                                    Optional<OpAsmParser::OperandType> &qbs1,
+                                    SmallVectorImpl<OpAsmParser::OperandType> &range1,
+                                    SmallVectorImpl<Type> &types1, ArrayAttr &staticRange1,
+                                    Optional<OpAsmParser::OperandType> &qbs2,
+                                    SmallVectorImpl<OpAsmParser::OperandType> &range2,
+                                    SmallVectorImpl<Type> &types2, ArrayAttr &staticRange2) {
+    if (parseOptionalQDataArg(p, qbs1, range1, types1, staticRange1))
+        return failure();
+    p.parseOptionalComma();
+    if (parseOptionalQDataArg(p, qbs2, range2, types2, staticRange2))
+        return failure();
+
+    return success();
+}
+
+// custom directive to print two optional quatum arguments with register accessors
+static void printMetaQDataArgs(OpAsmPrinter &p,
+                               Value qbs1, OperandRange range1, TypeRange, ArrayAttr staticRange1,
+                               Value qbs2, OperandRange range2, TypeRange, ArrayAttr staticRange2) {
+    if (qbs1) {
+        p << ", ";
+        printTwoQDataArg(p, qbs1, range1, nullptr, staticRange1,
+                            qbs2, range2, nullptr, staticRange2);
+    }
+}
+
+// custom directive to parse two optional quatum arguments with register accessors
+static ParseResult parseMetaQDataArgs(OpAsmParser &p,
+                                      Optional<OpAsmParser::OperandType> &qbs1,
+                                      SmallVectorImpl<OpAsmParser::OperandType> &range1,
+                                      SmallVectorImpl<Type> &types1, ArrayAttr &staticRange1,
+                                      Optional<OpAsmParser::OperandType> &qbs2,
+                                      SmallVectorImpl<OpAsmParser::OperandType> &range2,
+                                      SmallVectorImpl<Type> &types2, ArrayAttr &staticRange2) {
+    p.parseOptionalComma();
+    if (parseTwoQDataArg(p, qbs1, range1, types1, staticRange1,
+                            qbs2, range2, types2, staticRange2))
+        return failure();
+
+    return success();
+}
+
+// custom directive to print two optional quatum arguments with register accessors
+static void printCtrlArgs(OpAsmPrinter &p,
+                          Value ctrls, OperandRange crange, TypeRange, ArrayAttr staticCrange,
+                          Value qbs1, OperandRange range1, TypeRange, ArrayAttr staticRange1,
+                          Value qbs2, OperandRange range2, TypeRange, ArrayAttr staticRange2) {
+    printQDataArg(p, ctrls, crange, nullptr, staticCrange);
+    printMetaQDataArgs(p, qbs1, range1, nullptr, staticRange1, qbs2, range2, nullptr, staticRange2);
+}
+
+// custom directive to parse two optional quatum arguments with register accessors
+static ParseResult parseCtrlArgs(OpAsmParser &p,
+                                 OpAsmParser::OperandType &ctrls,
+                                 SmallVectorImpl<OpAsmParser::OperandType> &crange,
+                                 SmallVectorImpl<Type> &ctypes, ArrayAttr &staticCrange,
+                                 Optional<OpAsmParser::OperandType> &qbs1,
+                                 SmallVectorImpl<OpAsmParser::OperandType> &range1,
+                                 SmallVectorImpl<Type> &types1, ArrayAttr &staticRange1,
+                                 Optional<OpAsmParser::OperandType> &qbs2,
+                                 SmallVectorImpl<OpAsmParser::OperandType> &range2,
+                                 SmallVectorImpl<Type> &types2, ArrayAttr &staticRange2) {
+    if (parseQDataArg(p, ctrls, crange, ctypes, staticCrange) ||
+            parseMetaQDataArgs(p, qbs1, range1, types1, staticRange1,
+                                  qbs2, range2, types2, staticRange2))
+        return failure();
+
+    return success();
+}
+
+// custom directive to print arbitrary sequence of arguments in circuit calls
+static void printArbitraryArgs(OpAsmPrinter &p,
+                               OperandRange args, OperandRange ranges, TypeRange,
+                               ArrayAttr staticRanges, ArrayAttr sizeParams) {
+    const char *sep = "";
+    for (int sizeIdx = 0, argIdx = 0, rangeIdx = 0; sizeIdx < sizeParams.size(); sizeIdx++) {
+        p << sep; sep = ", ";
+
+        if (sizeParams[sizeIdx].cast<IntegerAttr>().getInt() != -1) {
+            p.printAttributeWithoutType(sizeParams[sizeIdx]);
             continue;
         }
 
-        sizeIdx++;
-        p.printOperand(args[argIdx]);
-
-        if (args[argIdx].getType().isa<QuregType>()) {
-            if (staticRanges.size()) {
-                ArrayAttr subArray = staticRanges[argIdx].dyn_cast<ArrayAttr>();
-                if (subArray.size())
-                    p << "[";
-                const char *sep = "";
-                for (auto attr : subArray) {
-                    p << sep;
-                    if (attr.dyn_cast<IntegerAttr>().getInt() == -1)
-                        p.printOperand(ranges[rangeIdx++]);
-                    else
-                        p.printAttributeWithoutType(attr);
-                    sep = ", ";
-                }
-                if (subArray.size())
-                    p << "]";
-            }
-        }
-
-        sep = ", ";
+        ArrayAttr subArray = staticRanges[argIdx].dyn_cast<ArrayAttr>();
+        OperandRange subRange = ranges.drop_front(rangeIdx);
+        rangeIdx += std::count_if(subArray.begin(), subArray.end(),
+            [](Attribute a){ return a.dyn_cast<IntegerAttr>().getInt() == -1; });
+        printQDataArg(p, args[argIdx++], subRange, nullptr, subArray);
     }
 }
 
-// custom directive for parsing the AppyCircOp
-static ParseResult parseApplyArgs(OpAsmParser &p, SmallVectorImpl<OpAsmParser::OperandType> &args,
-                                  SmallVectorImpl<OpAsmParser::OperandType> &ranges,
-                                  SmallVectorImpl<Type> &rangeTypes, ArrayAttr &staticRanges,
-                                  ArrayAttr &sizeParams) {
-    Builder b = p.getBuilder();
-    SmallVector<Attribute, 3> staticRangesVec;
-    SmallVector<Attribute, 3> sizeParamsVec;
-    int parsedOperands, parsedAccessors;
+// custom directive to parse arbitrary sequence of arguments in circuit calls
+static ParseResult parseArbitraryArgs(OpAsmParser &p,
+                                      SmallVectorImpl<OpAsmParser::OperandType> &args,
+                                      SmallVectorImpl<OpAsmParser::OperandType> &ranges,
+                                      SmallVectorImpl<Type> &rangesTypes, ArrayAttr &staticRanges,
+                                      ArrayAttr &sizeParams) {
+    Builder builder = p.getBuilder();
+    SmallVector<Attribute, 4> staticRangesValues;
+    SmallVector<Attribute, 2> sizeParamsValues;
 
-    // Since the variadic QData operands must come before any accessor operands, they can already
-    // be loaded onto the final list (allOperands), the accessors will then be appended at the end.
-    // The accessor array is populated inside the function call, which must then be added to the op.
-    if (parseMixedOperandsAccessorsConstants(p, args, ranges, staticRangesVec, sizeParamsVec,
-                                             parsedOperands, parsedAccessors))
+    do {
+        Optional<OpAsmParser::OperandType> operand(llvm::None);
+        ArrayAttr staticRange;
+        IntegerAttr sizeParam;
+
+        if (parseOptionalQDataArg(p, operand, ranges, rangesTypes, staticRange))
+            return failure();
+        if (operand) {
+            args.push_back(*operand);
+            staticRangesValues.push_back(staticRange);
+            sizeParamsValues.push_back(builder.getI64IntegerAttr(-1));
+        } else {
+            if (p.parseAttribute<IntegerAttr>(sizeParam))
+                return EMIT_ERROR(p, "expected next argument after comma!");
+            if (sizeParam.getInt() < 0)
+                return EMIT_ERROR(p, "negative size param during parsing!");
+            sizeParamsValues.push_back(sizeParam);
+        }
+    } while (succeeded(p.parseOptionalComma()));
+
+    staticRanges = builder.getArrayAttr(staticRangesValues);
+    sizeParams = builder.getArrayAttr(sizeParamsValues);
+
+    return success();
+}
+
+// custom directive to print quantum U1 gate type signature
+static void printU1TypeSig(OpAsmPrinter &p, Type qbsType, Type opType) {
+    if (qbsType) {
+        p << ": ";
+        p.printType(qbsType);
+    }
+    if (opType) {
+        p << "-> ";
+        p.printType(opType);
+    }
+}
+
+// custom directive to parse quantum U1 gate type signature
+static ParseResult parseU1TypeSig(OpAsmParser &p, Type &qbsType, Type &opType) {
+    if (succeeded(p.parseOptionalColon()))
+        if(p.parseType(qbsType))
+            return EMIT_ERROR(p, "expected type after ':' token!");
+    if (succeeded(p.parseOptionalArrow()))
+        if (p.parseType(opType))
+            return EMIT_ERROR(p, "expected type after '->' token!");
+    return success();
+}
+
+// custom directive to print quantum U2 gate type signature
+static void printU2TypeSig(OpAsmPrinter &p, Type qbs1Type, Type qbs2Type, Type opType) {
+    if (qbs1Type || qbs2Type)
+        p << ": ";
+    if (qbs1Type)
+        p.printType(qbs1Type);
+    if (qbs1Type && qbs2Type)
+        p << ", ";
+    if (qbs2Type)
+        p.printType(qbs2Type);
+    if (opType) {
+        p << "-> ";
+        p.printType(opType);
+    }
+}
+
+// custom directive to parse quantum U2 gate type signature
+static ParseResult parseU2TypeSig(OpAsmParser &p, Type &qbs1Type, Type &qbs2Type, Type &opType) {
+    if (succeeded(p.parseOptionalColon()))
+        if(p.parseType(qbs1Type) || p.parseComma() || p.parseType(qbs2Type))
+            return EMIT_ERROR(p, "expected 2 types after ':' token!");
+    if (succeeded(p.parseOptionalArrow()))
+        if (p.parseType(opType))
+            return EMIT_ERROR(p, "expected type after '->' token!");
+    return success();
+}
+
+// custom directive to print quantum meta gate type signature
+static void printMetaTypeSig(OpAsmPrinter &p, Type qbs1Type, Type qbs2Type, Type opType) {
+    if (qbs1Type || qbs2Type)
+        p << ", ";
+    if (qbs1Type)
+        p.printType(qbs1Type);
+    if (qbs1Type && qbs2Type)
+        p << ", ";
+    if (qbs2Type)
+        p.printType(qbs2Type);
+    if (opType) {
+        p << "-> ";
+        p.printType(opType);
+    }
+}
+
+// custom directive to parse quantum meta gate type signature
+static ParseResult parseMetaTypeSig(OpAsmParser &p, Type &qbs1Type, Type &qbs2Type, Type &opType) {
+    if (succeeded(p.parseOptionalComma()))
+        if(p.parseType(qbs1Type))
+            return EMIT_ERROR(p, "expected type after ',' token!");
+        if (succeeded(p.parseOptionalComma()))
+            if(p.parseType(qbs2Type))
+                return EMIT_ERROR(p, "expected type after ',' token!");
+    if (succeeded(p.parseOptionalArrow()))
+        if (p.parseType(opType))
+            return EMIT_ERROR(p, "expected type after '->' token!");
+    return success();
+}
+
+// custom directive to print quantum meta gate type signature
+static void printCtrlTypeSig(OpAsmPrinter &p,
+                             Type ctrlsType, Type qbs1Type, Type qbs2Type, Type opType) {
+    p.printType(ctrlsType);
+    printMetaTypeSig(p, qbs1Type, qbs2Type, opType);
+}
+
+// custom directive to parse quantum meta gate type signature
+static ParseResult parseCtrlTypeSig(OpAsmParser &p,
+                                    Type &ctrlsType, Type &qbs1Type, Type &qbs2Type, Type &opType) {
+    if (p.parseType(ctrlsType))
+        return EMIT_ERROR(p, "expected type after ',' token!");
+    if (parseMetaTypeSig(p, qbs1Type, qbs2Type, opType))
         return failure();
 
-    // add the parsed static accessor indices appropriate attribute
-    staticRanges = b.getArrayAttr(staticRangesVec);
-    // add the parsed integer constant to the appropriate attribute
-    sizeParams = b.getArrayAttr(sizeParamsVec);
+    return success();
+}
 
-    // fill in the types of the dynamic accessor indices
-    rangeTypes.reserve(ranges.size());
-    for (int i = 0; i < ranges.size(); i++)
-        rangeTypes.push_back(b.getIndexType());
+// custom directive to print a integer parameter
+static void printIntParam(OpAsmPrinter &p, Value dynArg, Type, Attribute staticArg) {
+    if (dynArg)
+        p.printOperand(dynArg);
+    if (staticArg)
+        p.printAttributeWithoutType(staticArg);
+}
+
+// custom directive to parse a integer parameter
+static ParseResult parseIntParam(OpAsmParser &p,
+                                 Optional<OpAsmParser::OperandType> &dynArg, Type &dynType,
+                                 Attribute &staticArg) {
+    OpAsmParser::OperandType operand;
+    auto res = p.parseOptionalOperand(operand);
+    if (res.hasValue() && failed(res.getValue())) {
+        return EMIT_ERROR(p, "unexpected failure for optional operand!");
+    } else if (res.hasValue()) {
+        dynArg = operand;
+        dynType = p.getBuilder().getIndexType();
+    } else if (p.parseAttribute(staticArg, p.getBuilder().getI64Type())) {
+        return EMIT_ERROR(p, "expected integer parameter!");
+    }
+
+    return success();
+}
+
+// custom directive to print a floating point parameter
+static void printFloatParam(OpAsmPrinter &p, Value dynArg, Type dynType, Attribute staticArg) {
+    if (dynArg) {
+        p.printOperand(dynArg);
+        p << ": ";
+        p.printType(dynType);
+    }
+    if (staticArg)
+        p.printAttributeWithoutType(staticArg);
+}
+
+// custom directive to parse a floating point parameter
+static ParseResult parseFloatParam(OpAsmParser &p,
+                                   Optional<OpAsmParser::OperandType> &dynArg, Type &dynType,
+                                   Attribute &staticArg) {
+    OpAsmParser::OperandType operand;
+    auto res = p.parseOptionalOperand(operand);
+    if (res.hasValue() && failed(res.getValue())) {
+        return EMIT_ERROR(p, "unexpected failure for optional operand!");
+    } else if (res.hasValue()) {
+        dynArg = operand;
+        if (p.parseColonType(dynType))
+            return EMIT_ERROR(p, "dynamic parem requires type!");
+    } else if (p.parseAttribute(staticArg, p.getBuilder().getF64Type())) {
+        return EMIT_ERROR(p, "expected floating point parameter!");
+    }
 
     return success();
 }
