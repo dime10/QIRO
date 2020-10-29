@@ -167,6 +167,244 @@ def FreeRegOp : QuantumSSA_Op<"freereg"> {
     }];
 }
 
+def ExtractOp : QuantumSSA_Op<"extract", [NoSideEffect]> {
+    let summary = "Extract qubits from register.";
+    let description = [{
+        This op generates new ssa values for single qubits inside a register(-like).
+        The remaining part of the register is always returned as a new valuen, even
+        when empty. The variadic indices can be either all constant or all dynamic.
+        To avoid aliasing, the input register is invalidated.
+
+        Example:
+
+        ```mlir
+        %r = "qs.allocreg"() {size=4} : () -> !qs.rstate<4>
+
+        // Extract single qubit from register
+        %q, %rem = "qs.extract"(%r) {const_idx=[2]} : (!qs.rstate<4>) -> (!qs.qstate, !qs.rstate<3>)
+        // OR in custom assembly format
+        %q, %rem = qs.extract %r[2] : !qs.rstate<4> -> !qs.qstate, !qs.rstate<3>
+
+        // Extract qubit with dynamic index from Qlist
+        func @foo(%l : !qs.rstate<>, %i : index) {
+            %q, %rem = "qs.extract"(%l, %i) : (!qs.rstate<>, index) -> (!qs.qstate, !qs.rstate<>)
+            // OR in custom assembly format
+            %q, %rem = qs.extract %l{%i} : !qs.rstate<>, index -> !qs.qstate, !qs.rstate<>
+            return
+        }
+    }];
+
+    let arguments = (ins
+        Rstate_Type : $reg,
+        Variadic<Index> : $dyn_idx,
+        OptionalAttr<Confined<NonNegI64ArrayAttr, [ArrayMinCount<1>]>> : $const_idx
+    );
+
+    let results = (outs
+        Variadic<Qstate_Type> : $qbs,
+        Rstate_Type : $rem
+    );
+
+    let verifier = [{
+        if (this->const_idx() && this->dyn_idx().size())
+            return this->emitOpError() << "takes indices as attributes or operands, but not both!";
+        if (!this->const_idx() && !this->dyn_idx().size())
+            return this->emitOpError() << "needs at least 1 index, either as attribute or operand!";
+
+        // check num indices/qubits match
+        unsigned numIdx = this->const_idx() ? (*this->const_idx()).size() : this->dyn_idx().size();
+        if (numIdx != this->qbs().size())
+            return this->emitOpError() << "with differing number of qubits vs indices, qubits: "
+                                       << this->qbs().size() << ", indices: " << numIdx << "!";
+
+        // return type checking
+        if (auto numQubits = this->reg().getType().cast<RstateType>().getNumQubits()) {
+            int regsize = *numQubits;
+
+            // bounds checking (if possible)
+            if(this->const_idx()) {
+                for (auto idxAttr : *this->const_idx()) {
+                    int64_t idx = idxAttr.dyn_cast<IntegerAttr>().getInt();
+                    if (idx >= regsize)
+                        return this->emitOpError() << "detected index value out of bounds, idx: "
+                                                   << idx << ", reg size: " << regsize << "!";
+                }
+            }
+
+            if (auto size = this->rem().getType().cast<RstateType>().getNumQubits())
+                if (*size != regsize - numIdx)
+                    return this->emitOpError() << "output reg size != (input reg size - # qubits)!";
+        }
+
+        // invalidate register value (no more uses beyond this point)
+        Value::user_range users = this->reg().getUsers();
+        if (dyn_cast_or_null<ExtractOp>(*users.begin()) != *this) {
+            return this->emitError() << "The register operand is invalid beyond this op, "
+                                        "but detected further use!";
+        }
+
+        return success();
+    }];
+
+    let assemblyFormat = [{
+        $reg ($const_idx^)? (`{` $dyn_idx^ `}`)? attr-dict `:` type($reg) `->` type(results)
+    }];
+}
+
+def CombineStatOp : QuantumSSA_Op<"scombine", [NoSideEffect]> {
+    let summary = "Merge qubits into register (statically).";
+    let description = [{
+        This op generates a new ssa values for for a register(-like) state obtained
+        from a previous register value and any number of additional qubits.
+        The provided indices indicating insertion points for each of the qubits must
+        be provided as an integer array attribute. To avoid aliasing, all quantum
+        input arguments (qubits & register states) are invalidated.
+
+        Example:
+
+        ```mlir
+        %r = "qs.allocreg"() {size=4} : () -> !qs.rstate<4>
+        %q = "qs.alloc"() : () -> !qs.qstate
+
+        // Add single qubit to register
+        %r2 = "qs.scombine"(%r, %q) {const_idx=[2]} : (!qs.rstate<4>, !qs.qstate) -> !qs.rstate<5>
+        // OR in custom assembly format
+        %r2 = qs.scombine %r[2], %q : !qs.rstate<4>, !qs.qstate -> !qs.rstate<5>
+    }];
+
+    let arguments = (ins
+        Rstate_Type : $reg,
+        Confined<NonNegI64ArrayAttr, [ArrayMinCount<1>]> : $const_idx,
+        Variadic<Qstate_Type> : $qbs
+    );
+
+    let results = (outs
+        Rstate_Type : $newreg
+    );
+
+    let verifier = [{
+        // check num indices/qubits match
+        unsigned numIdx = this->const_idx().size();
+        if (numIdx != this->qbs().size())
+            return this->emitOpError() << "with differing number of qubits vs indices, qubits: "
+                                       << this->qbs().size() << ", indices: " << numIdx << "!";
+
+        // return type checking
+        if (auto numQubits = this->reg().getType().cast<RstateType>().getNumQubits()) {
+            int regsize = *numQubits;
+            if (auto size = this->newreg().getType().cast<RstateType>().getNumQubits())
+                if (*size != regsize + numIdx)
+                    return this->emitOpError() << "output reg size != (input reg size + # qubits)!";
+
+            // bounds checking
+            llvm::SmallVector<int64_t, 8> idxArray; idxArray.reserve(numIdx);
+            for (auto idxAttr : this->const_idx())
+                idxArray.push_back(idxAttr.dyn_cast<IntegerAttr>().getInt());
+            std::sort(idxArray.begin(), idxArray.end());
+            for (int64_t idx : idxArray) {
+                if (idx > regsize)
+                        return this->emitOpError() << "detected index value out of bounds, idx: "
+                                                   << idx << ", reg size: " << regsize << "!";
+                regsize++;
+            }
+        }
+
+        // invalidate register and qubit values (no more uses beyond this point)
+        Value::user_range users = this->reg().getUsers();
+        if (dyn_cast_or_null<CombineStatOp>(*users.begin()) != *this) {
+            return this->emitError() << "The register operand is invalid beyond this op, "
+                                        "but detected further use!";
+        }
+        for (auto arg : this->qbs()) {
+            Value::user_range users = arg.getUsers();
+            if (dyn_cast_or_null<CombineStatOp>(*users.begin()) != *this) {
+                std::string errMsg("Operand value ");
+                llvm::raw_string_ostream stream(errMsg);
+                AsmState state(this->getParentOp());
+                arg.printAsOperand(stream, state);
+                errMsg += " is invalid beyond this op, but detected further use!";
+                return this->emitError() << errMsg;
+            }
+        }
+
+        return success();
+    }];
+
+    let assemblyFormat = [{
+        $reg $const_idx `,` $qbs attr-dict `:` type(operands) `->` type(results)
+    }];
+}
+
+def CombineDynOp : QuantumSSA_Op<"dcombine", [NoSideEffect, SameVariadicOperandSize]> {
+    let summary = "Merge qubits into register (dynamically).";
+    let description = [{
+        This op generates a new ssa values for for a register(-like) state obtained
+        from a previous register value and any number of additional qubits.
+        The provided indices indicating insertion points for each of the qubits must
+        be provided as ssa operands. To avoid aliasing, all quantum input arguments
+        (qubits & register states) are invalidated.
+
+        Example:
+
+        ```mlir
+        // Add qubit to Qlist with dynamic index
+        func @foo(%l : !qs.rstate<>, %i : index, %q : !qs.qstate) {
+            %l2 = "qs.dcombine"(%l, %i, %q) : (!qs.rstate<>, index, !qs.qstate) -> !qs.rstate<>
+            // OR in custom assembly format
+            %l2 = qs.dcombine %l{%i}, %q : !qs.rstate<>, index, !qs.qstate -> !qs.rstate<>
+            return
+        }
+    }];
+
+    let arguments = (ins
+        Rstate_Type : $reg,
+        Variadic<Index> : $dyn_idx,
+        Variadic<Qstate_Type> : $qbs
+    );
+
+    let results = (outs
+        Rstate_Type : $newreg
+    );
+
+    let verifier = [{
+        if (!this->qbs().size())
+            return this->emitOpError() << "needs at least 1 qubit value to insert!";
+
+        // return type checking
+        if (auto numQubits = this->reg().getType().cast<RstateType>().getNumQubits()) {
+            int regsize = *numQubits;
+            int numIdx = this->dyn_idx().size();
+            if (auto size = this->newreg().getType().cast<RstateType>().getNumQubits())
+                if (*size != regsize + numIdx)
+                    return this->emitOpError() << "output reg size != (input reg size - # qubits)!";
+        }
+
+        // invalidate register and qubit values (no more uses beyond this point)
+        Value::user_range users = this->reg().getUsers();
+        if (dyn_cast_or_null<CombineDynOp>(*users.begin()) != *this) {
+            return this->emitError() << "The register operand is invalid beyond this op, "
+                                        "but detected further use!";
+        }
+        for (auto arg : this->qbs()) {
+            Value::user_range users = arg.getUsers();
+            if (dyn_cast_or_null<CombineDynOp>(*users.begin()) != *this) {
+                std::string errMsg("Operand value ");
+                llvm::raw_string_ostream stream(errMsg);
+                AsmState state(this->getParentOp());
+                arg.printAsOperand(stream, state);
+                errMsg += " is invalid beyond this op, but detected further use!";
+                return this->emitError() << errMsg;
+            }
+        }
+
+        return success();
+    }];
+
+    let assemblyFormat = [{
+        $reg `[` $dyn_idx `]` `,` $qbs attr-dict `:` type($reg) `,` type($qbs) `->` type(results)
+    }];
+}
+
 def HOp : QuantumSSA_Gate<"H", [Unitary, Hermitian, NoSideEffect]> {
     let summary = "Hadamard gate.";
     let description = [{

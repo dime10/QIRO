@@ -8,6 +8,11 @@ def APFloatAttr : Attr<CPred<"$_self.isa<FloatAttr>()">, "arbitrary float atribu
     let returnType = [{ APFloat }];
 }
 
+def NonNegI64ArrayAttr : TypedArrayAttrBase<Confined<I64Attr, [IntNonNegative]>,
+                                            "Non-negative 64-bit integer array attribute"> {
+    let constBuilderCall = "$_builder.getI64ArrayAttr($0)";
+}
+
 // Define the basic properties of our dialect
 def QuantumSSA_Dialect : Dialect {
     let name = "qs";
