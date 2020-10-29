@@ -1010,18 +1010,20 @@ def ControlOp : Quantum_Gate<"ctrl", [Meta, AttrSizedOperandSegments]> {
         } else if (auto regType = ctrls.dyn_cast<QuregType>()) {
             if (auto numQubits = regType.getNumQubits())
                 totalctrls += *numQubits;
+            else if (this->static_crange().size() == 1)
+                totalctrls += 1;
             else
                 totalctrls = -1; // disable # of ctrl qubits check when no size is provided
         }
 
         if (auto cop = heldOp.dyn_cast<COpType>()) {
-            if (auto numCtrls = cop.getNumCtrls())
-                totalctrls += *numCtrls;
+            if (cop.getNumCtrls() && totalctrls != -1)
+                totalctrls += *cop.getNumCtrls();
             else
                 totalctrls = -1; // disable # of ctrl qubits check if base op is 'cop' without #
         }
 
-        if (this->static_crange().size())
+        if (this->static_crange().size() > 1)
             totalctrls = -1; // disable # of ctrl qubits check when using register accessors
 
         // perform several checks on the return type
