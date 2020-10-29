@@ -249,6 +249,8 @@ def ExtractOp : QuantumSSA_Op<"extract", [NoSideEffect]> {
     let assemblyFormat = [{
         $reg ($const_idx^)? (`{` $dyn_idx^ `}`)? attr-dict `:` type($reg) `->` type(results)
     }];
+
+    let hasCanonicalizer = 1;
 }
 
 def CombineStatOp : QuantumSSA_Op<"scombine", [NoSideEffect]> {
@@ -333,6 +335,8 @@ def CombineStatOp : QuantumSSA_Op<"scombine", [NoSideEffect]> {
     let assemblyFormat = [{
         $reg $const_idx `,` $qbs attr-dict `:` type(operands) `->` type(results)
     }];
+
+    let hasCanonicalizer = 1;
 }
 
 def CombineDynOp : QuantumSSA_Op<"dcombine", [NoSideEffect, SameVariadicOperandSize]> {

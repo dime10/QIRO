@@ -1,5 +1,7 @@
 #include "mlir/IR/BlockAndValueMapping.h"
 #include "mlir/IR/Builders.h"
+#include "mlir/IR/Matchers.h"
+#include "mlir/IR/PatternMatch.h"
 #include "mlir/Pass/Pass.h"
 #include "mlir/Dialect/StandardOps/IR/Ops.h"
 
@@ -440,9 +442,550 @@ public:
     }
 };
 
+
+//===------------------------------------------------------------------------------------------===//
+// Rewrite patterns for the consolidation of extract/combine blocks
+//===------------------------------------------------------------------------------------------===//
+
+class ExtractExtractPatt : public RewritePattern {
+public:
+    ExtractExtractPatt(PatternBenefit benefit, MLIRContext *context) :
+        RewritePattern(ExtractOp::getOperationName(), benefit, context) {}
+
+    // Match (extract - extract) pattern within the same region
+    LogicalResult match(Operation *op) const override {
+        ExtractOp extr = dyn_cast<ExtractOp>(op);
+        Operation *parent = extr.reg().getDefiningOp();
+        if (!isa_and_nonnull<ExtractOp>(parent) ||
+                parent->getParentRegion() != op->getParentRegion())
+            return failure();
+        // for now only match const index operations
+        if (extr.dyn_idx().size() || cast<ExtractOp>(parent).dyn_idx().size())
+            return failure();
+        return success();
+    }
+
+    void rewrite(Operation *op2, PatternRewriter &rewriter) const override {
+        ExtractOp extr2 = dyn_cast<ExtractOp>(op2);
+        Operation *op1 = extr2.reg().getDefiningOp();
+        ExtractOp extr1 = dyn_cast<ExtractOp>(op1);
+
+        // index recalculation & merging (indices of later extract op get added to end of earlier)
+        ArrayAttr idxArr2 = extr2.const_idxAttr();
+        ArrayAttr idxArr1 = extr1.const_idxAttr();
+        int totalNumIdx = idxArr2.size() + idxArr1.size();
+
+        llvm::SmallVector<int64_t, 8> mergedIdxArr; mergedIdxArr.reserve(totalNumIdx);
+        llvm::SmallVector<int64_t, 4> sortedIdx1; sortedIdx1.reserve(idxArr1.size());
+        for (auto idx1 : idxArr1) {
+            mergedIdxArr.push_back(idx1.dyn_cast<IntegerAttr>().getInt());
+            sortedIdx1.push_back(idx1.dyn_cast<IntegerAttr>().getInt());
+        }
+        std::sort(sortedIdx1.begin(), sortedIdx1.end());
+
+        for (auto idx2 : idxArr2) {
+            int64_t idx2val = idx2.dyn_cast<IntegerAttr>().getInt();
+            for (int64_t idx1val : sortedIdx1) {
+                if (idx1val <= idx2val)
+                    idx2val++;
+            }
+            mergedIdxArr.push_back(idx2val);
+        }
+
+        // build new op to replace the first extract op in order to add additional result values
+        // (seemingly no way currently to do it in place)
+        llvm::SmallVector<Type, 9> mergedResTypes(totalNumIdx + 1, rewriter.getType<QstateType>());
+        Type newRemType;
+        if (auto numQubits = extr1.reg().getType().cast<RstateType>().getNumQubits()) {
+            int qbsLeft = *numQubits - totalNumIdx;
+            assert(qbsLeft >= 0 && "Error during ExtractOp merge, new register has negative size!");
+            newRemType = rewriter.getType<RstateType>(qbsLeft);
+        } else {
+            newRemType = extr1.rem().getType();
+        }
+        mergedResTypes[totalNumIdx] = newRemType;
+        OperationState state(op1->getLoc(), op1->getName());
+        ExtractOp::build(rewriter, state, mergedResTypes, op1->getOperands(), op1->getAttrs());
+
+        rewriter.setInsertionPoint(op1);
+        Operation *newOp1 = rewriter.createOperation(state);
+        newOp1->setAttr("const_idx", rewriter.getI64ArrayAttr(mergedIdxArr));
+        ExtractOp newExtr1 = cast<ExtractOp>(newOp1);
+
+        // extr2 will be removed entirely, return values replaced with new ones from newExtr1
+        // extr1 will be replaced with the merged newExtr1, return values similarly replaced
+        llvm::SmallVector<Value, 5> resultsOp1; resultsOp1.reserve(idxArr1.size() + 1);
+        llvm::SmallVector<Value, 5> resultsOp2; resultsOp2.reserve(idxArr2.size() + 1);
+        for (int i = 0; i < idxArr1.size(); i++)
+            resultsOp1.push_back(newOp1->getResult(i));
+        resultsOp1.push_back(newExtr1.rem());
+        for (int i = idxArr1.size(); i < totalNumIdx; i++)
+            resultsOp2.push_back(newOp1->getResult(i));
+        resultsOp2.push_back(newExtr1.rem());
+
+        // this instruciton erases the given op and replaces all its uses with the provided values
+        rewriter.replaceOp(op2, resultsOp2);
+        rewriter.replaceOp(op1, resultsOp1);
+
+        if (failed(newExtr1.verify()))
+            throw;
+    }
+};
+
+class CombineCombinePatt : public RewritePattern {
+public:
+    CombineCombinePatt(PatternBenefit benefit, MLIRContext *context) :
+        RewritePattern(CombineStatOp::getOperationName(), benefit, context) {}
+
+    // Match (combine - combine) pattern within the same region
+    LogicalResult match(Operation *op) const override {
+        CombineStatOp comb = dyn_cast<CombineStatOp>(op);
+        Operation *parent = comb.reg().getDefiningOp();
+        if (!isa_and_nonnull<CombineStatOp>(parent) ||
+                parent->getParentRegion() != op->getParentRegion())
+            return failure();
+        return success();
+    }
+
+    void rewrite(Operation *op2, PatternRewriter &rewriter) const override {
+        CombineStatOp comb2 = dyn_cast<CombineStatOp>(op2);
+        Operation *op1 = comb2.reg().getDefiningOp();
+        CombineStatOp comb1 = dyn_cast<CombineStatOp>(op1);
+
+        rewriter.startRootUpdate(op2);
+
+        // index recalculation & merging (indices of later extract op get added to end of earlier)
+        ArrayAttr idxArr1 = comb1.const_idxAttr();
+        ArrayAttr idxArr2 = comb2.const_idxAttr();
+        unsigned totalNumIdx = idxArr1.size() + idxArr2.size();
+
+        llvm::SmallVector<int64_t, 8> mergedIdxArr; mergedIdxArr.reserve(totalNumIdx);
+        llvm::SmallVector<int64_t, 4> sortedIdx2; sortedIdx2.reserve(idxArr2.size());
+        for (auto idx2 : idxArr2) {
+            mergedIdxArr.push_back(idx2.dyn_cast<IntegerAttr>().getInt());
+            sortedIdx2.push_back(idx2.dyn_cast<IntegerAttr>().getInt());
+        }
+        std::sort(sortedIdx2.begin(), sortedIdx2.end());
+
+        for (auto idx1 : idxArr1) {
+            int64_t idx1val = idx1.dyn_cast<IntegerAttr>().getInt();
+            for (int64_t idx2val : sortedIdx2) {
+                if (idx2val <= idx1val)
+                    idx1val++;
+            }
+            mergedIdxArr.push_back(idx1val);
+        }
+
+        op2->setAttr("const_idx", rewriter.getI64ArrayAttr(mergedIdxArr));
+        // append all qubit operands of first combine to second combine
+        op2->insertOperands(op2->getNumOperands(), comb1.qbs());
+
+        rewriter.finalizeRootUpdate(op2);
+
+        // this instruction erases the given op and replaces all its uses with the provided values
+        rewriter.replaceOp(op1, comb1.reg());
+
+        if (failed(cast<CombineStatOp>(op2).verify()))
+            throw;
+    }
+};
+
+class CombineExtractPatt : public RewritePattern {
+public:
+    CombineExtractPatt(PatternBenefit benefit, MLIRContext *context) :
+        RewritePattern(ExtractOp::getOperationName(), benefit, context) {}
+
+    // Match (combine - extract) pattern within the same region
+    LogicalResult match(Operation *op2) const override {
+        ExtractOp extr2 = dyn_cast<ExtractOp>(op2);
+        if (!extr2 || extr2.dyn_idx().size())
+            return failure();
+        Operation *op1 = extr2.reg().getDefiningOp();
+        if (!isa_and_nonnull<CombineStatOp>(op1) ||
+                op1->getParentRegion() != op2->getParentRegion())
+            return failure();
+
+        // only match if there is some overlapp in the index sets
+        CombineStatOp comb1 = cast<CombineStatOp>(op1);
+        for (auto idx1 : comb1.const_idxAttr()) {
+            int64_t idx1val = idx1.dyn_cast<IntegerAttr>().getInt();
+            for (auto idx2 : extr2.const_idxAttr()) {
+                int64_t idx2val = idx2.dyn_cast<IntegerAttr>().getInt();
+                if (idx1val == idx2val)
+                    return success();
+            }
+        }
+
+        return failure();
+    }
+
+    void rewrite(Operation *op2, PatternRewriter &rewriter) const override {
+        ExtractOp extr2 = dyn_cast<ExtractOp>(op2);
+        Operation *op1 = extr2.reg().getDefiningOp();
+        CombineStatOp comb1 = dyn_cast<CombineStatOp>(op1);
+
+        rewriter.startRootUpdate(op1);
+        rewriter.startRootUpdate(op2);
+
+        // identify commmon indices
+        ArrayAttr idxArr1 = comb1.const_idxAttr();
+        ArrayAttr idxArr2 = extr2.const_idxAttr();
+        llvm::SmallVector<int64_t, 4> newIdxArr1; newIdxArr1.reserve(idxArr1.size());
+        llvm::SmallVector<std::tuple<int, int, int64_t>, 4> commonIndices;
+        for (int i = 0; i < idxArr1.size(); i++) {
+            int64_t idx1val = idxArr1[i].dyn_cast<IntegerAttr>().getInt();
+            bool match = false;
+            for (int j = 0; j < idxArr2.size(); j++) {
+                int64_t idx2val = idxArr2[j].dyn_cast<IntegerAttr>().getInt();
+                if (idx1val == idx2val) {
+                    commonIndices.push_back({i, j, idx1val});
+                    match = true;
+                    break;
+                }
+            }
+            if (!match)
+                newIdxArr1.push_back(idx1val);
+        }
+        std::vector<Attribute> newIdxArr2 = idxArr2.getValue().vec();
+        for (auto idxTriple : commonIndices)
+            newIdxArr2[std::get<1>(idxTriple)] = nullptr;
+        for (auto it = newIdxArr2.begin(); it != newIdxArr2.end();) {
+            if (!(*it))
+                it = newIdxArr2.erase(it);
+            else
+                it++;
+        }
+        // adjust indices
+        for (int64_t &idx : newIdxArr1) {
+            int offset = 0;
+            for (auto idxTriple : commonIndices) {
+                if (std::get<2>(idxTriple) < idx)
+                    offset++;
+            }
+            idx -= offset;
+        }
+        for (auto &idxAttr : newIdxArr2) {
+            int offset = 0;
+            int64_t idxVal = idxAttr.dyn_cast<IntegerAttr>().getInt();
+            for (auto idxTriple : commonIndices) {
+                if (std::get<2>(idxTriple) < idxVal)
+                    offset++;
+            }
+            idxAttr = rewriter.getIntegerAttr(rewriter.getI64Type(), idxVal - offset);
+        }
+        // remove indices from combine
+        op1->setAttr("const_idx", rewriter.getI64ArrayAttr(newIdxArr1));
+        // remove indices from extract
+        op2->setAttr("const_idx", rewriter.getArrayAttr(newIdxArr2));
+
+        rewriter.finalizeRootUpdate(op2);
+
+        // replace extract return values with combine qb args
+        if (!newIdxArr2.empty()) {
+            // build new extract op, unless empty
+            llvm::SmallVector<Type, 4> newExtrResTypes(newIdxArr2.size() + 1,
+                                                       rewriter.getType<QstateType>());
+            Type newRemType;
+            if (auto numQubits = extr2.reg().getType().cast<RstateType>().getNumQubits()) {
+                int qbsLeft = *numQubits - commonIndices.size() - newIdxArr2.size();
+                assert(qbsLeft >= 0 && "Error during Combine-Extract common index cancelation, "
+                                       "new register has negative size!");
+                newRemType = rewriter.getType<RstateType>(qbsLeft);
+            } else {
+                newRemType = extr2.rem().getType();
+            }
+            newExtrResTypes[newIdxArr2.size()] = newRemType;
+            OperationState state(op2->getLoc(), op2->getName());
+            ExtractOp::build(rewriter, state, newExtrResTypes, op2->getOperands(), op2->getAttrs());
+
+            rewriter.setInsertionPoint(op2);
+            Operation *newOp2 = rewriter.createOperation(state);
+            ExtractOp newExtr2 = cast<ExtractOp>(newOp2);
+            // build updated value list
+            llvm::SmallVector<Value, 4> updatedValues; updatedValues.reserve(op2->getNumResults());
+            for (int i = 0, j = 0, k = 0; i < extr2.qbs().size(); i ++) {
+                if (j < commonIndices.size() && i == std::get<1>(commonIndices[j]))
+                    updatedValues.push_back(comb1.qbs()[std::get<0>(commonIndices[j++])]);
+                else
+                    updatedValues.push_back(newExtr2.qbs()[k++]);
+            }
+            updatedValues.push_back(newExtr2.rem());
+            // replace old with new op
+            rewriter.replaceOp(op2, updatedValues);
+        } else {
+            assert(idxArr2.size() == commonIndices.size() && "something went wrong in the match!");
+            // build array of replacement values from combine
+            llvm::SmallVector<Value, 4> passthroughValues;
+            passthroughValues.reserve(commonIndices.size());
+            for (auto idxTriple : commonIndices)
+                passthroughValues.push_back(comb1.qbs()[std::get<0>(idxTriple)]);
+            // add reg from current extract op
+            passthroughValues.push_back(extr2.reg());
+            // replace
+            rewriter.replaceOp(op2, passthroughValues);
+        }
+
+        // remove combine qb args, updating return type requires building new op
+        if (!newIdxArr1.empty()) {
+            // remove obsolete qubit arguments from combine op
+            // index order in commonIndices guaranteed to be as they appear in comb1
+            int delOffset = 0;
+            for (auto idxTriple : commonIndices) {
+                op1->eraseOperand(std::get<0>(idxTriple)+1 - delOffset++);
+            }
+
+            rewriter.finalizeRootUpdate(op1);
+
+            // build new extract op, unless empty
+            Type newregType;
+            if (auto numQubits = comb1.reg().getType().cast<RstateType>().getNumQubits()) {
+                int qbsLeft = *numQubits + newIdxArr1.size();
+                assert(qbsLeft >= 0 && "Error during Combine-Extract common index cancelation, "
+                                       "new register has negative size!");
+                newregType = rewriter.getType<RstateType>(qbsLeft);
+            } else {
+                newregType = comb1.reg().getType();
+            }
+            OperationState state(op1->getLoc(), op1->getName());
+            CombineStatOp::build(rewriter, state, newregType, op1->getOperands(), op1->getAttrs());
+
+            rewriter.setInsertionPoint(op1);
+            Operation *newOp1 = rewriter.createOperation(state);
+            CombineStatOp newComb1 = cast<CombineStatOp>(newOp1);
+
+            // replace old with new op
+            rewriter.replaceOp(op1, newComb1.newreg());
+        } else {
+            rewriter.finalizeRootUpdate(op1);
+            // if empty delete combine, replace newreg with reg
+            rewriter.replaceOp(op1, comb1.reg());
+        }
+    }
+};
+
+class CombineExtractCombinePatt : public RewritePattern {
+public:
+    CombineExtractCombinePatt(PatternBenefit benefit, MLIRContext *context) :
+        RewritePattern(CombineStatOp::getOperationName(), benefit, context) {}
+
+    // Match (combine - extract - combine) pattern within the same region
+    LogicalResult match(Operation *op3) const override {
+        CombineStatOp comb3 = dyn_cast<CombineStatOp>(op3);
+        Operation *op2 = comb3.reg().getDefiningOp();
+        if (!isa_and_nonnull<ExtractOp>(op2) || op2->getParentRegion() != op3->getParentRegion())
+            return failure();
+
+        ExtractOp extr2 = cast<ExtractOp>(op2);
+        if (extr2.dyn_idx().size())
+            return failure();
+        Operation *op1 = extr2.reg().getDefiningOp();
+        if (!isa_and_nonnull<CombineStatOp>(op1) ||
+                op1->getParentRegion() != op2->getParentRegion())
+            return failure();
+
+        // only match if there is no overlapp in the index sets
+        CombineStatOp comb1 = cast<CombineStatOp>(op1);
+        for (auto idx1 : comb1.const_idxAttr()) {
+            int64_t idx1val = idx1.dyn_cast<IntegerAttr>().getInt();
+            for (auto idx2 : extr2.const_idxAttr()) {
+                int64_t idx2val = idx2.dyn_cast<IntegerAttr>().getInt();
+                if (idx1val == idx2val)
+                    return failure();
+            }
+        }
+
+        return success();
+    }
+
+    void rewrite(Operation *op3, PatternRewriter &rewriter) const override {
+        CombineStatOp comb3 = dyn_cast<CombineStatOp>(op3);
+        Operation *op2 = comb3.reg().getDefiningOp();
+        ExtractOp extr2 = dyn_cast<ExtractOp>(op2);
+        Operation *op1 = extr2.reg().getDefiningOp();
+        CombineStatOp comb1 = dyn_cast<CombineStatOp>(op1);
+
+        rewriter.startRootUpdate(op2);
+        rewriter.startRootUpdate(op3);
+
+        // append indices from comb1 to comb3
+        ArrayAttr idxArr1 = comb1.const_idx();
+        ArrayAttr idxArr3 = comb3.const_idx();
+        llvm::SmallVector<int64_t, 8> newIdxArr; newIdxArr.reserve(idxArr1.size() + idxArr3.size());
+        for (auto idx3 : idxArr3)
+            newIdxArr.push_back(idx3.dyn_cast<IntegerAttr>().getInt());
+        for (auto idx1 : idxArr1)
+            newIdxArr.push_back(idx1.dyn_cast<IntegerAttr>().getInt());
+        op3->setAttr("const_idx", rewriter.getI64ArrayAttr(newIdxArr));
+        // append qb args from comb1 to comb3
+        op3->insertOperands(op3->getNumOperands(), comb1.qbs());
+        rewriter.finalizeRootUpdate(op3);
+        // shift indices for middle extract
+        std::vector<Attribute> idxArr2 = extr2.const_idxAttr().getValue().vec();
+        for (auto &idx2 : idxArr2) {
+            int offset = 0;
+            int64_t idx2val = idx2.dyn_cast<IntegerAttr>().getInt();
+            for (auto idx1 : idxArr1) {
+                int64_t idx1val = idx1.dyn_cast<IntegerAttr>().getInt();
+                if (idx1val < idx2val)
+                    offset++;
+            }
+            idx2 = rewriter.getIntegerAttr(rewriter.getI64Type(), idx2val - offset);
+        }
+        op2->setAttr("const_idx", rewriter.getArrayAttr(idxArr2));
+        rewriter.finalizeRootUpdate(op2);
+        // delete comb1, replace extr2 reg with comb1 reg
+        rewriter.replaceOp(op1, comb1.reg());
+
+        // update return type of extr2
+        int newInSize = *op2->getOperand(0).getType().cast<RstateType>().getNumQubits();
+        int newOutSize = newInSize - idxArr2.size();
+        RstateType newRemType = rewriter.getType<RstateType>(newOutSize);
+        std::vector<Type> newResTypes = op2->getResultTypes().vec();
+        newResTypes[newResTypes.size()-1] = newRemType;
+
+        OperationState state(op2->getLoc(), op2->getName());
+        ExtractOp::build(rewriter, state, newResTypes, op2->getOperands(), op2->getAttrs());
+        rewriter.setInsertionPoint(op2);
+        Operation *newOp2 = rewriter.createOperation(state);
+
+        rewriter.replaceOp(op2, newOp2->getResults());
+    }
+};
+
+class ExtractCombinePatt : public RewritePattern {
+public:
+    ExtractCombinePatt(PatternBenefit benefit, MLIRContext *context) :
+        RewritePattern(CombineStatOp::getOperationName(), benefit, context) {}
+
+    // Match (extract - combine) pattern within the same region
+    LogicalResult match(Operation *op2) const override {
+        CombineStatOp comb2 = cast<CombineStatOp>(op2);
+        Operation *op1 = comb2.reg().getDefiningOp();
+        if (!isa_and_nonnull<ExtractOp>(op1) || op1->getParentRegion() != op2->getParentRegion())
+            return failure();
+        ExtractOp extr1 = cast<ExtractOp>(op1);
+        if (extr1.dyn_idx().size())
+            return failure();
+
+        // only match if there is some direct overlapp in the qubit sets, implying unused values
+        for (Value qb1 : extr1.qbs()) {
+            for (Value qb2 : comb2.qbs()) {
+                if (qb1 == qb2)
+                    return success();
+            }
+        }
+
+        return failure();
+    }
+
+    void rewrite(Operation *op2, PatternRewriter &rewriter) const override {
+        CombineStatOp comb2 = cast<CombineStatOp>(op2);
+        Operation *op1 = comb2.reg().getDefiningOp();
+        ExtractOp extr1 = cast<ExtractOp>(op1);
+
+        // identify common qbs
+        ResultRange extrQbs = extr1.qbs();
+        OperandRange combQbs = comb2.qbs();
+        llvm::SmallVector<std::pair<int, int>, 4> commonQbs;
+        for (int i = 0; i < combQbs.size(); i++) {
+            for (int j = 0; j < extrQbs.size(); j++) {
+                if (combQbs[i] == extrQbs[j]) {
+                    commonQbs.push_back({i, j});
+                    break;
+                }
+            }
+        }
+
+        // if either is empty, delete
+        int combQbsLeft = comb2.qbs().size() - commonQbs.size();
+        assert(combQbsLeft >= 0 && "Negative # combine qbs left during Extract-Combine!");
+        if (!combQbsLeft) {
+            rewriter.replaceOp(op2, comb2.reg());
+        } else {
+            rewriter.startRootUpdate(op2);
+            // remove common qbs from comb2
+            int delOffset = 0;
+            for (auto idxPair : commonQbs) {
+                op2->eraseOperand(idxPair.first+1 - delOffset++);
+            }
+            // remove indices from attribute
+            ArrayAttr idxArr2 = comb2.const_idxAttr();
+            llvm::SmallVector<Attribute, 3> newIdxArr2; newIdxArr2.reserve(combQbsLeft);
+            for (int i = 0, j = 0; i < idxArr2.size(); i++) {
+                if (j < commonQbs.size() && i != commonQbs[j].first) {
+                    newIdxArr2.push_back(idxArr2[i]);
+                    j++;
+                }
+            }
+            op2->setAttr("const_idx", rewriter.getArrayAttr(newIdxArr2));
+            rewriter.finalizeRootUpdate(op2);
+        }
+
+        // if either is empty, delete
+        int extrQbsLeft = extr1.qbs().size() - commonQbs.size();
+        assert(extrQbsLeft >= 0 && "Negative # extract qbs left during Extract-Combine!");
+        if (!extrQbsLeft) {
+            llvm::SmallVector<Value, 4> replacementValues(op1->getNumResults(), nullptr);
+            replacementValues[op1->getNumResults()-1] = extr1.reg();
+            rewriter.replaceOp(op1, replacementValues);
+        } else {
+            // to remove common qbs from extr1 return values, need to build new op
+            llvm::SmallVector<Type, 4> newResTypes(extrQbsLeft+1, rewriter.getType<QstateType>());
+            Type regType = extr1.reg().getType();
+            Type newRemType = regType.isa<RstateType>() ? rewriter.getType<RstateType>(extrQbsLeft)
+                                                        : extr1.rem().getType();
+
+            newResTypes[newResTypes.size()-1] = newRemType;
+            OperationState state(op1->getLoc(), op1->getName());
+            ExtractOp::build(rewriter, state, newResTypes, op1->getOperands(), op1->getAttrs());
+            rewriter.setInsertionPoint(op1);
+            Operation *newOp1 = rewriter.createOperation(state);
+
+            // build updated value list, deleted qbs will be replaced with null values
+            // as there aren't anymore uses of those values but replaceOp expects a value anyways
+            llvm::SmallVector<Value, 4> replaceVals; replaceVals.reserve(op1->getNumResults());
+            for (Value retVal : newOp1->getResults())
+                replaceVals.push_back(retVal);
+            // to correctly insert null values basend on original indices, need to sort them first
+            std::sort(commonQbs.begin(), commonQbs.end(),
+                      [](auto &left, auto &right) { return left.second < right.second; });
+            for (auto idxPair : commonQbs)
+                    replaceVals.insert(replaceVals.begin()+idxPair.second, nullptr);
+            // remove indices from attribute
+            ArrayAttr idxArr1 = extr1.const_idxAttr();
+            llvm::SmallVector<Attribute, 3> newIdxArr1; newIdxArr1.reserve(extrQbsLeft);
+            for (int i = 0, j = 0; i < idxArr1.size(); i++) {
+                if (j < commonQbs.size() && i != commonQbs[j].second) {
+                    newIdxArr1.push_back(idxArr1[i]);
+                    j++;
+                }
+            }
+            rewriter.startRootUpdate(newOp1);
+            newOp1->setAttr("const_idx", rewriter.getArrayAttr(newIdxArr1));
+            rewriter.finalizeRootUpdate(newOp1);
+
+            // replace old op
+            rewriter.replaceOp(op1, replaceVals);
+        }
+    }
+};
 } // end namespace
 
 // Pass creation functions declared in Passes.h
 std::unique_ptr<Pass> quantum::createMemToValPass() {
     return std::make_unique<MemToValPass>();
+}
+
+// Register all patterns for rewrite by the Canonicalization framework
+void ExtractOp::getCanonicalizationPatterns(OwningRewritePatternList &patterns,
+                                            MLIRContext *context) {
+    patterns.insert<ExtractExtractPatt>(3, context);
+    patterns.insert<CombineExtractPatt>(2, context);
+}
+
+void CombineStatOp::getCanonicalizationPatterns(OwningRewritePatternList &patterns,
+                                                MLIRContext *context) {
+    patterns.insert<CombineCombinePatt>(3, context);
+    patterns.insert<CombineExtractCombinePatt>(1, context);
+    patterns.insert<ExtractCombinePatt>(2, context);
 }
