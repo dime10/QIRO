@@ -111,6 +111,62 @@ def AllocRegOp : QuantumSSA_Op<"allocreg", [NoSideEffect]> {
     }];
 }
 
+def FreeOp : QuantumSSA_Op<"free"> {
+    let summary = "Deallocate a qubit.";
+    let description = [{
+        The free command deallocates a qubit with the system. The qubit is not
+        required to be in the |0> state, but it must be disentangled from all
+        other qubits.
+
+        This operation takes one operand of type 'qstate'.
+
+        Example:
+
+        ```mlir
+        // Deallocate single qubit
+        "qs.free"(%qb) : (!qs.qstate) -> ()
+        // OR in custom assembly format
+        qs.free %qb : !qs.qstate
+        ```
+    }];
+
+    let arguments = (ins
+        Qstate_Type
+    );
+
+    let assemblyFormat = [{
+        operands attr-dict `:` type(operands)
+    }];
+}
+
+def FreeRegOp : QuantumSSA_Op<"freereg"> {
+    let summary = "Deallocate a qubit register.";
+    let description = [{
+        This free command deallocates a qubit register with the system. The register
+        is not required to be in the |0..> state, but every qubit inside must be
+        disentangled from all other qubits.
+
+        This operation takes one operand of type 'rstate'.
+
+        Example:
+
+        ```mlir
+        // Allocate qubit register
+        "qs.freereg"(%reg) : (!qs.rstate<4>) -> ()
+        // OR in custom assembly format
+        qs.freereg %reg : !qs.rstate<4>
+        ```
+    }];
+
+    let arguments = (ins
+        Rstate_Type : $reg
+    );
+
+    let assemblyFormat = [{
+        operands attr-dict `:` type(operands)
+    }];
+}
+
 def HOp : QuantumSSA_Gate<"H", [Unitary, Hermitian, NoSideEffect]> {
     let summary = "Hadamard gate.";
     let description = [{
@@ -353,6 +409,58 @@ def CNotOp : QuantumSSA_Gate<"CX", [Unitary, Hermitian, NoSideEffect, AttrSizedO
 
     let assemblyFormat = [{
         ($ctrl^ `,` $qbs `:` type($ctrl) `,` type($qbs))? `->` type(results) attr-dict
+    }];
+}
+
+def SwapOp : QuantumSSA_Gate<"SWAP", [Unitary, Hermitian, Commutative, AttrSizedOperandSegments]> {
+    let summary = "SWAP gate.";
+    let description = [{
+        The SWAP gate is a two Qubit (hermitian) unitary.
+        Due to its hermitian property it is also its own inverse.
+        Its 4x4 matrix representation in the computational basis is given by:
+            [[1, 0, 0, 0],
+             [0, 0, 1, 0],
+             [0, 1, 0, 0],
+             [0, 0, 0, 1]]
+
+        This operation takes two single qubit states as input and returns
+        their updated states. Alternatively, if no targets are the provided,
+        the operation is returned with type 'u2'.
+
+        Example:
+
+        ```mlir
+        %0 = "qs.alloc"() : () -> !qs.qstate
+        %1 = "qs.alloc"() : () -> !qs.qstate
+        // Apply a SWAP to qubits %0 and %1
+        "q.SWAP"(%0, %1) : (!q.qstate, !q.qstate) -> (!q.qstate, !q.qstate)
+        // OR in custom assembly format
+        q.SWAP %0, %1 : !q.qstate, !q.qstate -> !q.qstate, !q.qstate
+        ```
+    }];
+
+    let arguments = (ins
+        Optional<Qstate_Type> : $qbs2,
+        Optional<Qstate_Type> : $qbs
+    );
+
+    let results = (outs
+        Optional<Qstate_Type> : $new_qbs2,
+        AnyTypeOf<[Qstate_Type, U2_Type]> : $res
+    );
+
+    let additionalVerifier = [{
+        auto res = this->res().getType();
+
+        if (this->qbs2() && !this->qbs() || !this->qbs2() && this->qbs())
+            return this->emitOpError() << "accepts either both qubit operands or neither!";
+
+        if (!res.isa<U2Type>() && !this->new_qbs2() || res.isa<U2Type>() && this->new_qbs2())
+            return this->emitOpError() << "must return either both qubit states or neither!";
+    }];
+
+    let assemblyFormat = [{
+        ($qbs2^ `,` $qbs `:` type($qbs2) `,` type($qbs))? `->` type(results) attr-dict
     }];
 }
 
@@ -861,6 +969,69 @@ def AdjointOp : QuantumSSA_Gate<"adj", [Meta, NoSideEffect, AttrSizedOperandSegm
 
     let assemblyFormat = [{
         $heldOp custom<OneOrTwoQbs>($qbs2, $qbs) attr-dict `:` type(operands) `->` type(results)
+    }];
+}
+
+def MeasurementOp : QuantumSSA_Op<"meas"> {
+    let summary = "Measure qubits.";
+    let description = [{
+        This operation performs a measurement on individual or groups of qubits.
+        The measurement results are returned as clasical boolean values.
+
+        Example:
+        ```mlir
+        %0 = "qs.alloc"() : () -> !qs.qstate
+        %1 = "qs.allocreg"() {size=4} : () -> !qs.rstate<4>
+        // measure single qubit
+        %m = "qs.meas"(%0) : (!qs.qstate) -> (!qs.qstate, i1)
+        // OR in custom assebly format
+        %m = qs.meas %0 : !qs.qstate -> !qs.qstate, i1
+        // measure register
+        %mr = "qs.meas"(%1) : (!qs.rstate<4>) -> (!qs.rstate<4>, memref<4xi1>)
+        // OR in custom assembly format
+        %mr = qs.meas %1 : !qs.rstate<4> -> !qs.rstate<4>, memref<4xi1>
+        ```
+    }];
+
+    let arguments = (ins
+        QData_Type : $qbs
+    );
+
+    let results = (outs
+        QData_Type : $qbs_out,
+        AnyTypeOf<[I1, I1MemRef]> : $res
+    );
+
+    let verifier = [{
+        Type qbsType = this->qbs().getType();
+        Type resType = this->res().getType();
+
+        if (qbsType != this->qbs_out().getType())
+            return this->emitOpError() << "must have matching types for in/output qubit states!";
+
+        if (auto mrefType = resType.dyn_cast<MemRefType>()) {
+            if (!mrefType.hasRank() || mrefType.getRank() != 1)
+                return this->emitOpError() << "only produces ranked memrefs of 1 dimension!";
+
+            if (auto qregType = qbsType.dyn_cast<RstateType>()) {
+                if (qregType.getNumQubits()) {
+                    if (mrefType.isDynamicDim(0))
+                        return this->emitOpError() << "if available must provide static dim size!";
+                    else if (*qregType.getNumQubits() != mrefType.getDimSize(0))
+                        return this->emitOpError() << "mismatch in rstate and memref size!";
+                }
+            } else {
+                return this->emitOpError() << "must return 'i1' when measuring qubit!";
+            }
+        } else if (!qbsType.isa<QstateType>()) {
+            return this->emitOpError() << "must return memref when measuring multiple qubits!";
+        }
+
+        return success();
+    }];
+
+    let assemblyFormat = [{
+        operands attr-dict `:` type(operands) `->` type(results)
     }];
 }
 

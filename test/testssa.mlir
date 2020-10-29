@@ -11,6 +11,9 @@ module {
     %r0_0 = qs.allocreg(4) -> !qs.rstate<4>
     %r1_0 = qs.allocreg(%size) -> !qs.rstate<>
 
+    qs.free %q0_0 : !qs.qstate
+    qs.freereg %r0_0 : !qs.rstate<4>
+
     %h = qs.H -> !qs.u1
     %q0_1 = qs.H %q0_0 : !qs.qstate -> !qs.qstate
     %q0_2 = qs.H %q0_0 : !qs.qstate -> !qs.qstate       // state reuse is illegal but not enforced
@@ -22,8 +25,9 @@ module {
     %q0_3 = qs.X %q0_2 : !qs.qstate -> !qs.qstate
     %q0_4 = qs.RZ(%fp) %q0_3 : f64, !qs.qstate -> !qs.qstate
     %q0_5 = qs.R(%fp) %q0_4 : f64, !qs.qstate -> !qs.qstate
-    %q1_1, %q0_7 = qs.CX %q1_0, %q0_5 : !qs.qstate, !qs.qstate -> !qs.qstate, !qs.qstate
-    %q1_3, %r0_2 = qs.CX %q1_1, %r0_1 : !qs.qstate, !qs.rstate<4> -> !qs.qstate, !qs.rstate<4>
+    %q1_1, %q0_6 = qs.CX %q1_0, %q0_5 : !qs.qstate, !qs.qstate -> !qs.qstate, !qs.qstate
+    %q1_2, %r0_2 = qs.CX %q1_1, %r0_1 : !qs.qstate, !qs.rstate<4> -> !qs.qstate, !qs.rstate<4>
+    %q1_3, %q0_7 = qs.SWAP %q1_2, %q0_6 : !qs.qstate, !qs.qstate -> !qs.qstate, !qs.qstate
 
     %q1_4, %ch = qs.ctrl %h, %q1_3 : !qs.u1, !qs.qstate -> !qs.qstate, !qs.cop<1, !qs.u1>
     %q1_5, %q0_10 = qs.ctrl %h, %q1_4, %q0_7 : !qs.u1, !qs.qstate, !qs.qstate -> !qs.qstate, !qs.qstate
@@ -52,4 +56,10 @@ module {
     %q0_22 = qs.apply %ccirc(%q0_21) : !qs.cop<1, !qs.circ>(!qs.qstate -> !qs.qstate)
     %q0_23 = qs.apply %acirc(%q0_22) : !qs.circ(!qs.qstate -> !qs.qstate)
     //%q0_24 = qs.apply %ch(%q0_23) : !qs.cop<1, !qs.u1>>(!qs.qstate) // only works on circ types
+
+    // test measurements
+    %q0_24, %m0 = qs.meas %q0_23 : !qs.qstate -> !qs.qstate, i1
+    %r0_6, %m1 = qs.meas %r0_5 : !qs.rstate<4> -> !qs.rstate<4>, memref<4xi1>
+    //qs.meas %q0_24 : !qs.qstate -> !qs.qstate, memref<1xi1>
+    //qs.meas %r0_5 : !qs.rstate<4> -> !qs.rstate<4>, i1
 }

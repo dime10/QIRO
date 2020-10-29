@@ -107,6 +107,62 @@ def AllocRegOp : Quantum_Op<"allocreg", [NoSideEffect]> {
     }];
 }
 
+def FreeOp : Quantum_Op<"free"> {
+    let summary = "Deallocate a qubit.";
+    let description = [{
+        The free command deallocates a qubit with the system. The qubit is not
+        required to be in the |0> state, but it must be disentangled from all
+        other qubits.
+
+        This operation takes one operand of type 'qubit'.
+
+        Example:
+
+        ```mlir
+        // Deallocate single qubit
+        "q.free"(%qb) : (!q.qubit) -> ()
+        // OR in custom assembly format
+        q.free %qb : !q.qubit
+        ```
+    }];
+
+    let arguments = (ins
+        Qubit_Type
+    );
+
+    let assemblyFormat = [{
+        operands attr-dict `:` type(operands)
+    }];
+}
+
+def FreeRegOp : Quantum_Op<"freereg"> {
+    let summary = "Deallocate a qubit register.";
+    let description = [{
+        This free command deallocates a qubit register with the system. The register
+        is not required to be in the |0..> state, but every qubit inside must be
+        disentangled from all other qubits.
+
+        This operation takes one operand of type 'qureg'.
+
+        Example:
+
+        ```mlir
+        // Deallocate qubit register
+        "q.freereg"(%reg) : (!q.qureg<4>) -> ()
+        // OR in custom assembly format
+        q.freereg %reg : !q.qureg<4>
+        ```
+    }];
+
+    let arguments = (ins
+        Qureg_Type : $reg
+    );
+
+    let assemblyFormat = [{
+        operands attr-dict `:` type(operands)
+    }];
+}
+
 def GenRegOp : Quantum_Op<"genreg", [NoSideEffect]> {
     let summary = "Generate a register from multiple qubits/quregs.";
     let description = [{
@@ -466,6 +522,66 @@ def CNotOp : Quantum_Gate<"CX", [Unitary, Hermitian, AttrSizedOperandSegments]>{
         custom<TwoQDataArg>($ctrl, $crange, type($crange), $static_crange,
                             $qbs, $qrange, type($qrange), $static_qrange)
         attr-dict custom<U2TypeSig>(type($ctrl), type($qbs), type($op))
+    }];
+}
+
+def SwapOp : Quantum_Gate<"SWAP", [Unitary, Hermitian, AttrSizedOperandSegments, Commutative]> {
+    let summary = "SWAP gate.";
+    let description = [{
+        The SWAP gate is a two Qubit (hermitian) unitary.
+        Due to its hermitian property it is also its own inverse.
+        Its 4x4 matrix representation in the computational basis is given by:
+            [[1, 0, 0, 0],
+             [0, 0, 1, 0],
+             [0, 1, 0, 0],
+             [0, 0, 0, 1]]
+
+        Both targets must be a singular qubit. The return type is 'u2'.
+        It acts on the qubits via side-effect by changing the quantum state.
+
+        Example:
+
+        ```mlir
+        %0 = "q.alloc"() : () -> !q.qubit
+        %1 = "q.alloc"() : () -> !q.qubit
+        // Apply a SWAP to qubits %0 and %1
+        "q.SWAP"(%0, %1) : (!q.qubit, !q.qubit) -> ()
+        // OR in custom assembly format
+        q.SWAP %0, %1 : !q.qubit, !q.qubit
+        ```
+    }];
+
+    let arguments = (ins
+        Optional<QData_Type> : $qbs,
+        Variadic<Index> : $range,
+        I64ArrayAttr : $static_range,
+        Optional<QData_Type> : $qbs2,
+        Variadic<Index> : $range2,
+        I64ArrayAttr : $static_range2
+    );
+
+    let results = (outs
+        Optional<U2_Type> : $op
+    );
+
+    let additionalVerifier = [{
+        if (this->qbs() && !this->qbs2() || !this->qbs() && this->qbs2())
+            return this->emitOpError() << "accepts either both operands or neither!";
+
+        std::string errMsg = "needs single qubit for both operands, thus if any value is a "
+                             "register, must provide exactly 1 accessor index for that value!";
+        if (this->qbs() && this->qbs().getType().isa<QuregType>()
+                && this->static_range().size() != 1)
+            return this->emitOpError() << errMsg;
+        if (this->qbs2() && this->qbs2().getType().isa<QuregType>()
+                && this->static_range2().size() != 1)
+            return this->emitOpError() << errMsg;
+    }];
+
+    let assemblyFormat = [{
+        custom<TwoQDataArg>($qbs, $range, type($range), $static_range,
+                            $qbs2, $range2, type($range2), $static_range2)
+        attr-dict custom<U2TypeSig>(type($qbs), type($qbs2), type($op))
     }];
 }
 
@@ -1013,6 +1129,71 @@ def AdjointOp : Quantum_Gate<"adj", [Meta, AttrSizedOperandSegments]> {
                               $qbs2, $range2, type($range2), $static_range2)
         attr-dict `:` type($heldOp)
         custom<MetaTypeSig>(type($qbs), type($qbs2), type($op))
+    }];
+}
+
+def MeasurementOp : Quantum_Op<"meas"> {
+    let summary = "Measure qubits.";
+    let description = [{
+        This operation performs a measurement on individual or groups of qubits.
+        The measurement results are returned as clasical boolean values.
+
+        Example:
+        ```mlir
+        %0 = "q.alloc"() : () -> !q.qubit
+        %1 = "q.allocreg"() {size=4} : () -> !q.qureg<4>
+        // measure single qubit
+        %m = "q.meas"(%0) {static_range=[]} : (!q.qubit) -> i1
+        // OR in custom assebly format
+        %m = q.meas %0 : !q.qubit -> i1
+        // measure register
+        %mr = "q.meas"(%1) {static_range=[]} : (!q.qureg<4>) -> memref<4xi1>
+        // OR in custom assembly format
+        %mr = q.meas %1 : !q.qureg<4> -> memref<4xi1>
+        ```
+    }];
+
+    let arguments = (ins
+        QData_Type : $qbs,
+        Variadic<Index> : $range,
+        I64ArrayAttr : $static_range
+    );
+
+    let results = (outs
+        AnyTypeOf<[I1, I1MemRef]> : $res
+    );
+
+    let verifier = [{
+        Type qbsType = this->qbs().getType();
+        Type resType = this->res().getType();
+        int staticSize = this->static_range().size();
+
+        if (auto mrefType = resType.dyn_cast<MemRefType>()) {
+            if (!mrefType.hasRank() || mrefType.getRank() != 1)
+                return this->emitOpError() << "only produces ranked memrefs of 1 dimension!";
+
+            if (auto qregType = qbsType.dyn_cast<QuregType>()) {
+                if (staticSize == 0 && qregType.getNumQubits()) {
+                    if (mrefType.isDynamicDim(0))
+                        return this->emitOpError() << "if available must provide static dim size!";
+                    else if (*qregType.getNumQubits() != mrefType.getDimSize(0))
+                        return this->emitOpError() << "mismatch in qureg and memref size!";
+                } else if (staticSize == 1) {
+                    return this->emitOpError() << "must return 'i1' when measuring reg. qubit!";
+                }
+            } else {
+                return this->emitOpError() << "must return 'i1' when measuring qubit!";
+            }
+        } else if (!qbsType.isa<QubitType>() && staticSize != 1) {
+            return this->emitOpError() << "must return memref when measuring multiple qubits!";
+        }
+
+        return success();
+    }];
+
+    let assemblyFormat = [{
+        custom<QDataArg>($qbs, $range, type($range), $static_range) attr-dict
+        `:` type($qbs) `->` type(results)
     }];
 }
 

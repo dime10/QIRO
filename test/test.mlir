@@ -20,6 +20,13 @@ module {
     %4 = "q.allocreg"(%size) : (index) -> !q.qureg<>
     %5 =  q.allocreg(%size) -> !q.qureg<>
 
+    // test deallocation ops
+    "q.free"(%0) : (!q.qubit) -> ()
+    q.free %1 : !q.qubit
+
+    "q.freereg"(%2) : (!q.qureg<4>) -> ()
+    q.freereg %3 : !q.qureg<4>
+
 
     // test basic gates, including their custom assembly formats
     "q.H"(%0) {operand_segment_sizes = dense<[1, 0]> : vector<2xi32>, static_range = []} : (!q.qubit) -> ()
@@ -110,6 +117,17 @@ module {
     //q.CX %0[2], %0 : !q.qubit, !q.qubit  // illegal on anything but qureg
     //q.CX %0[%s], %0 : !q.qubit, !q.qubit // illegal on anything but qureg
 
+
+    "q.SWAP"(%0, %1) {operand_segment_sizes = dense<[1, 0, 1, 0]> : vector<4xi32>, static_range = [], static_range2 = []} : (!q.qubit, !q.qubit) -> ()
+    q.SWAP %0, %1 : !q.qubit, !q.qubit
+    %op14 = "q.SWAP"() {operand_segment_sizes = dense<0> : vector<4xi32>, static_range = [], static_range2 = []} : () -> !q.u2
+    %op15 = q.SWAP -> !q.u2
+
+    q.SWAP %0, %2[2] : !q.qubit, !q.qureg<4>
+    q.SWAP %2[%b], %0 : !q.qureg<4>, !q.qubit
+    q.SWAP %2[0], %2[%a] : !q.qureg<4>, !q.qureg<4>
+    //q.SWAP %0, %2 : !q.qubit, !q.qureg<4>
+    //q.SWAP %2[%a,%b], %0 : !q.qureg<4>, !q.qubit
 
     // create a small test circuit
     "q.circ"() ({
@@ -242,4 +260,20 @@ module {
     q.apply %acirc0(%0, %1) : !q.circ(!q.qubit, !q.qubit)
     //q.apply %op0 : !q.u1             // can only be applied to circuit(-derived) types
     //q.apply %cop0 : !q.cop<1, !q.u1> // can only be applied to circuit(-derived) types
+
+    %m0 = "q.meas"(%0) {static_range=[]} : (!q.qubit) -> i1
+    %m1 =  q.meas %0 : !q.qubit -> i1
+    %m2 = "q.meas"(%2) {static_range=[]} : (!q.qureg<4>) -> memref<4xi1>
+    %m3 =  q.meas %2 : !q.qureg<4> -> memref<4xi1>
+
+    %m4 = q.meas %2[2] : !q.qureg<4> -> i1
+    %m5 = q.meas %2[%a,%b] : !q.qureg<4> -> memref<?xi1>
+    %m6 = q.meas %2[1,%b,2] : !q.qureg<4> -> memref<?xi1>
+
+    //q.meas %0 : !q.qubit -> memref<1xi1>       // need i1
+    //q.meas %2[2] : !q.qureg<4> -> memref<1xi1> // need i1
+    //q.meas %2 : !q.qureg<4> -> i1              // need memref
+    //q.meas %2 : !q.qureg<4> -> memref<?xi1>    // static dim size
+    //q.meas %2 : !q.qureg<4> -> memref<3xi1>    // wrong dim size
+    //q.meas %2 : !q.qureg<4> -> memref<2x2xi1>  // only 1 dimension allowed
 }
