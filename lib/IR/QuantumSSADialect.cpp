@@ -244,7 +244,7 @@ static void print(OpAsmPrinter &p, CircuitOp op) {
     impl::printFunctionAttributes(p, op.getOperation(), type.getNumInputs(), type.getNumResults());
 
     p.printRegion(op.OpTrait::FunctionLike<CircuitOp>::getBody(),
-                  /*printEntryBlockArgs=*/false, /*printBlockTerminators=*/false);
+                  /*printEntryBlockArgs=*/false, /*printBlockTerminators=*/true);
 }
 
 // custom parsing for the function-like CircuitOp
@@ -333,11 +333,11 @@ LogicalResult CircuitOp::verifyType() {
     for (auto argType : this->getType().getInputs()) {
         if (argType.isa<QstateType>() || argType.isa<RstateType>()) {
             if (retType == this->getType().getResults().end())
-                this->emitOpError() << "has too few return values! Every QData argument "
-                                        "needs to be returned in its updated state.";
+                return this->emitOpError() << "has too few return values! Every QData argument "
+                                              "needs to be returned in its updated state.";
             if (*retType != argType)
-                this->emitOpError() << "has mismatched return type! Requires: " << argType
-                                    << ". Got: " << *retType << ".";
+                return this->emitOpError() << "has mismatched return type! Requires: " << argType
+                                           << ". Got: " << *retType << ".";
             retType++;
         }
     }

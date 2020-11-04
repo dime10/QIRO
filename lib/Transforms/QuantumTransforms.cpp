@@ -4,6 +4,8 @@
 #include "mlir/IR/PatternMatch.h"
 #include "mlir/Pass/Pass.h"
 #include "mlir/Dialect/StandardOps/IR/Ops.h"
+#include "mlir/Dialect/Affine/IR/AffineOps.h"
+#include "mlir/Dialect/SCF/SCF.h"
 
 #include "QuantumDialect.h"
 #include "QuantumSSADialect.h"
@@ -25,6 +27,10 @@ bool isQData(Type ty) {
     return ty.isa<quantum::QubitType>() || ty.isa<quantum::QuregType>();
 }
 
+bool isQSSAData(Type ty) {
+    return ty.isa<QstateType>() || ty.isa<RstateType>();
+}
+
 
 //===------------------------------------------------------------------------------------------===//
 // Memory to Value semantics pass
@@ -41,9 +47,8 @@ namespace std {
 
 namespace {
 struct MemToValPass : public OperationPass<ModuleOp> {
-    MemToValPass() : OperationPass<ModuleOp>(TypeID::get<MemToValPass>()), numCirc(0) {}
-    MemToValPass(const MemToValPass &) : OperationPass<ModuleOp>(TypeID::get<MemToValPass>()),
-                                         numCirc(0) {}
+    MemToValPass() : OperationPass<ModuleOp>(TypeID::get<MemToValPass>()) {}
+    MemToValPass(const MemToValPass &) : OperationPass<ModuleOp>(TypeID::get<MemToValPass>()) {}
 
     StringRef getName() const {
         return "MemToValPass";
@@ -55,381 +60,600 @@ struct MemToValPass : public OperationPass<ModuleOp> {
 
 private:
     using value_map = std::unordered_map<Value, Value>;
+    OpBuilder *opBuilder;
     // keep a record of the latest qubit state to replace qubit values with
     value_map globalStateMap;
-    value_map localStateMap;
-    // temporary storage for newly created functions
-    Operation *newfn;
-    // storage for operands of circuit ops, since these need to be moved to the call site (apply...)
-    std::unordered_map<Value, llvm::SmallVector<Value, 4>> circArgMap;
-    // circuit counter to generate unique names
-    unsigned numCirc;
+    // temporary storage for newly created circuits
+    Operation *circInProg;
 
-    void walk(Operation *op, function_ref<void(Operation*, value_map&)> callback,
-                             function_ref<void(Operation*)> cleanup) {
-        // function ops need to be called before nested ops are recursed into
-        if (isa<FuncOp>(op) || isa<quantum::CircuitOp>(op))
-            callback(op, localStateMap);
+    void walk(Operation *op, value_map &outerStateMap, SmallVectorImpl<Value> &outerUniqueValues,
+              function_ref<void(Operation*, value_map&, const SmallVectorImpl<Value>&,
+                           const SmallVectorImpl<Value>&)> callback) {
+        // the qubit state mapping and list of values used inside op region needs to be nestable
+        value_map innerStateMap;
+        SmallVector<Value, 8> innerUniqueValues;
+        SmallVector<Value, 8> iterArgs;
+        SmallVector<Value, 0> dummy;
+
+        // do not recurse into functions as they do not contain any quantum operations
+        if (isa<FuncOp>(op))
+            return callback(op, innerStateMap, dummy, dummy);
+
+        // some ops need some preprocessing before nested ops are recursed into
+        if (isa<quantum::CircuitOp>(op))  // circuit ops need a fully local (empty) inner state map
+            callback(op, innerStateMap, dummy, dummy);
+        else if (isa<scf::IfOp>(op))      // map is unused here
+            prepControlFlow(op, *opBuilder, innerStateMap, innerUniqueValues, iterArgs);
+        else if (isa<AffineForOp>(op)) {  // CF needs a temperary local copy of the outer map
+            innerStateMap = outerStateMap;
+            prepControlFlow(op, *opBuilder, innerStateMap, innerUniqueValues, iterArgs);
+        }
 
         // walk nested operations
-        for (auto &region : op->getRegions())
+        bool isSCF = isa<AffineForOp>(op) || isa<scf::IfOp>(op);
+        bool isNesting = isa<quantum::CircuitOp>(op) || isSCF;
+        value_map &mapToUse = isNesting ? innerStateMap : outerStateMap;
+        SmallVectorImpl<Value> &valsToUse = isSCF ? innerUniqueValues : outerUniqueValues;
+        for (auto &region : op->getRegions()) {
+            if (isa<scf::IfOp>(op))       // SCF:If as above, but temp copy between each region
+                innerStateMap = outerStateMap;
             for (auto &block : region)
                 for (auto &nestedOp : llvm::make_early_inc_range(block))
-                    walk(&nestedOp, callback, cleanup);
+                    walk(&nestedOp, mapToUse, innerUniqueValues, callback);
+        }
 
         // perform postorder call -> most ops as they can only be deleted after recursing
-        if (isa<FuncOp>(op) || isa<quantum::CircuitOp>(op))
-            cleanup(op);
-        else if (op->getParentOp() && (isa<FuncOp>(op->getParentOp()) ||
-                                       isa<quantum::CircuitOp>(op->getParentOp())))
-            callback(op, localStateMap);
+        if (isa<quantum::CircuitOp>(op))
+            finalizeCircuit(op, circInProg);
         else
-            callback(op, globalStateMap);
+            callback(op, outerStateMap, valsToUse, iterArgs);
     }
 
-    static Type convDialectType(Type inType, Builder &builder, const Value &operand = nullptr) {
+    static Type convDialectType(Builder &b, Type inType) {
         Type outType;
-        if (inType.isa<quantum::U1Type>()) {
-            outType = builder.getType<U1Type>();
-        } else if (inType.isa<quantum::U2Type>()) {
-            outType = builder.getType<U2Type>();
-        } else if (auto copType = inType.dyn_cast<quantum::COpType>()) {
-            llvm::Optional<int> n = copType.getNumCtrls();
-            Type baseType = copType.getBaseType();
-            baseType = baseType ? convDialectType(baseType, builder, operand) : baseType;
-            outType = builder.getType<COpType>(n, baseType);
-        } else if (inType.isa<quantum::CircType>()) {
-            assert(operand && "Invalid operand during type conversion of 'CircType'!");
-            outType = operand.getType();
-        } else if (inType.isa<quantum::QubitType>()) {
-            outType = builder.getType<QstateType>();
-        } else if (auto regType = inType.dyn_cast<quantum::QuregType>()) {
-            outType = builder.getType<RstateType>(regType.getNumQubits());
-        } else {
+        if (inType.isa<quantum::U1Type>())
+            outType = b.getType<U1Type>();
+        else if (inType.isa<quantum::U2Type>())
+            outType = b.getType<U2Type>();
+        else if (auto copType = inType.dyn_cast<quantum::COpType>())
+            outType = b.getType<COpType>(copType.getNumCtrls(),
+                                         convDialectType(b, copType.getBaseType()));
+        else if (inType.isa<quantum::CircType>())
+            outType = b.getType<CircType>();
+        else if (inType.isa<quantum::QubitType>())
+            outType = b.getType<QstateType>();
+        else if (auto regType = inType.dyn_cast<quantum::QuregType>())
+            outType = b.getType<RstateType>(regType.getNumQubits());
+        else
             assert(false && "Unrecognized dialect type encountered during conversion!");
-        }
         return outType;
     }
 
-    static void parseBuildParams(Operation *op, value_map &qbmap, OpBuilder &builder, Value &phi,
-                                 Value &ctrl, Value &ctrlState, Value &trgt, Value &trgtState,
-                                 Value &heldOp, Type &retType, OperationState &opState) {
-        phi = heldOp = ctrl = ctrlState = trgt = trgtState = nullptr;
-        if (isa<quantum::HOp>(op)) {
-            trgt = cast<quantum::HOp>(op).qbs();
-            opState = OperationState(op->getLoc(), HOp::getOperationName());
-        } else if (isa<quantum::XOp>(op)) {
-            trgt = cast<quantum::XOp>(op).qbs();
-            opState = OperationState(op->getLoc(), XOp::getOperationName());
-        } else if (isa<quantum::RzOp>(op)) {
-            if (auto phiattr = cast<quantum::RzOp>(op).static_phiAttr()) {
-                OperationState auxState(op->getLoc(), ConstantOp::getOperationName());
-                ConstantOp::build(builder, auxState, builder.getF64Type(), phiattr);
-                phi = builder.createOperation(auxState)->getResult(0);
-            } else {
-                phi = cast<quantum::RzOp>(op).phi();
-            }
-            trgt = cast<quantum::RzOp>(op).qbs();
-            opState = OperationState(op->getLoc(), RzOp::getOperationName());
-        } else if (isa<quantum::ROp>(op)) {
-            if (auto phiattr = cast<quantum::ROp>(op).static_phiAttr()) {
-                OperationState auxState(op->getLoc(), ConstantOp::getOperationName());
-                ConstantOp::build(builder, auxState, builder.getF64Type(), phiattr);
-                phi = builder.createOperation(auxState)->getResult(0);
-            } else {
-                phi = cast<quantum::ROp>(op).phi();
-            }
-            trgt = cast<quantum::ROp>(op).qbs();
-            opState = OperationState(op->getLoc(), ROp::getOperationName());
-        } else if (isa<quantum::CNotOp>(op)) {
-            ctrl = cast<quantum::CNotOp>(op).ctrl();
-            trgt = cast<quantum::CNotOp>(op).qbs();
-            opState = OperationState(op->getLoc(), CNotOp::getOperationName());
-        } else if (isa<quantum::ControlOp>(op)) {
-            heldOp = cast<quantum::ControlOp>(op).heldOp();
-            ctrl = cast<quantum::ControlOp>(op).ctrls();
-            trgt = cast<quantum::ControlOp>(op).qbs();
-            opState = OperationState(op->getLoc(), ControlOp::getOperationName());
-        } else if (isa<quantum::AdjointOp>(op)) {
-            heldOp = cast<quantum::AdjointOp>(op).heldOp();
-            trgt = cast<quantum::AdjointOp>(op).qbs();
-            opState = OperationState(op->getLoc(), AdjointOp::getOperationName());
+    static Operation* buildExtr(OpBuilder &b, Operation *op, const Value &reg,
+                                const ValueRange &range, const ArrayAttr &staticRange) {
+        assert(staticRange.size() >= 1 && "Need at least one index to extract qubits!");
+
+        llvm::Optional<int> numQubits = reg.getType().cast<RstateType>().getNumQubits();
+        numQubits = numQubits ? llvm::Optional<int>(*numQubits - staticRange.size()) : llvm::None;
+        SmallVector<Type, 3> retTypes(staticRange.size()+1, b.getType<QstateType>());
+        retTypes[staticRange.size()] = b.getType<RstateType>(numQubits);
+        bool dynamic = staticRange[0].cast<IntegerAttr>().getInt() == -1;
+
+        OperationState extrState(op->getLoc(), ExtractOp::getOperationName());
+        if (dynamic)
+            ExtractOp::build(b, extrState, retTypes, reg, range, nullptr);
+        else
+            ExtractOp::build(b, extrState, retTypes, reg, {}, staticRange);
+
+        return b.createOperation(extrState);
+    }
+
+    static Operation* buildComb(OpBuilder &b, Operation *op, const Value &reg, const ValueRange &qbs,
+                                const ValueRange &range, const ArrayAttr &staticRange) {
+        assert(staticRange.size() >= 1 && "Need at least one index to extract qubits!");
+
+        llvm::Optional<int> numQubits = reg.getType().cast<RstateType>().getNumQubits();
+        numQubits = numQubits ? llvm::Optional<int>(*numQubits + staticRange.size()) : llvm::None;
+        Type retType = b.getType<RstateType>(numQubits);
+        bool dynamic = staticRange[0].cast<IntegerAttr>().getInt() == -1;
+
+        if (dynamic) {
+            OperationState combState(op->getLoc(), CombineDynOp::getOperationName());
+            CombineDynOp::build(b, combState, retType, reg, range, qbs);
+            return b.createOperation(combState);
         } else {
-            return;
+            OperationState combState(op->getLoc(), CombineStatOp::getOperationName());
+            CombineStatOp::build(b, combState, retType, reg, staticRange, qbs);
+            return b.createOperation(combState);
         }
-        if (trgt) trgtState = qbmap[trgt];
-        if (ctrl) ctrlState = qbmap[ctrl];
-        if (trgt) retType = trgtState.getType();
-        else      retType = convDialectType(op->getResult(0).getType(), builder, heldOp);
+    }
+
+    static void parseGateParams(OpBuilder &b, value_map &qbmap, Operation *op,
+                                SmallVectorImpl<Value> &operands, SmallVectorImpl<Value> &qargs,
+                                SmallVectorImpl<Type> &retTypes, bool hasPhi) {
+
+        if (hasPhi && (!op->getNumOperands() || !op->getOperand(0).getType().isa<FloatType>())) {
+            OperationState auxState(op->getLoc(), ConstantOp::getOperationName());
+            ConstantOp::build(b, auxState, op->getAttr("static_phi"));
+            operands.push_back(b.createOperation(auxState)->getResult(0));
+        }
+
+        for (auto arg : op->getOperands()) {
+            if (arg.getType().isa<IndexType>()) {
+                continue;
+            } else if (isQData(arg.getType())) {
+                operands.push_back(qbmap[arg]);
+                qargs.push_back(arg);
+                retTypes.push_back(qbmap[arg].getType());
+            } else {
+                operands.push_back(arg);
+            }
+        }
+
+        if (op->getNumResults())
+            retTypes.push_back(convDialectType(b, op->getResult(0).getType()));
+    }
+
+    template<class G> static Operation* buildGate(OpBuilder &b, value_map &qbmap, Operation *op,
+                                                  ArrayRef<ValueRange> ranges,
+                                                  ArrayRef<ArrayAttr> staticRanges) {
+        SmallVector<Value, 4> operands;  // all operands to the new op, qdata replaced from qbmap
+        SmallVector<Value, 3> qargs;     // original qdata arguments to input op
+        SmallVector<Value, 3> newStates; // qdata return values to update qbmap with
+        SmallVector<Type, 3> retTypes;   // return types of the new op
+        bool hasPhi = std::is_same<G, RzOp>::value || std::is_same<G, ROp>::value;
+        parseGateParams(b, qbmap, op, operands, qargs, retTypes, hasPhi);
+        SmallVector<Operation*, 2> extrOps, combOps;
+
+        // collect information about indexed registers, each distinct register needs its own
+        // extract/combine ops, multiple uses of the same register are combined into one pair
+        using access_info = std::tuple<Value, SmallVector<Value, 2>, SmallVector<int64_t, 2>,
+                                       SmallVector<std::pair<int, int>, 2>>;
+        SmallVector<access_info, 2> regsToExtr;
+        std::unordered_map<Value, int> seen;
+        for (int i = 0, j = 0; i < operands.size(); i++) {
+            if (isQSSAData(operands[i].getType())) {
+                if (staticRanges[j].size() == 1) {
+                    if (seen.count(operands[i])) {
+                        access_info &t = regsToExtr[seen[operands[i]]];
+                        if (ranges[j].size())
+                            std::get<1>(t).push_back(ranges[j][0]);
+                        std::get<2>(t).push_back(staticRanges[j][0].cast<IntegerAttr>().getInt());
+                        std::get<3>(t).push_back({i, j});
+                    } else {
+                        seen[operands[i]] = regsToExtr.size();
+                        regsToExtr.push_back(std::make_tuple(
+                            operands[i],
+                            ranges[j].size() ? SmallVector<Value, 2>(1, ranges[j][0])
+                                             : SmallVector<Value, 2>(),
+                            SmallVector<int64_t, 2>(1, staticRanges[j][0].cast<IntegerAttr>().getInt()),
+                            SmallVector<std::pair<int, int>, 2>(1, {i, j})
+                        ));
+                    }
+                } else if (staticRanges[j].size() > 1) {
+                    assert(false && "Ranges are not yet supported!");
+                }
+                j++;
+            }
+        }
+
+        // build extract op for each distinct register argument with single index only
+        for (access_info &t : regsToExtr) {
+            Operation *extrOp = buildExtr(b, op, std::get<0>(t), std::get<1>(t),
+                                          b.getI64ArrayAttr(std::get<2>(t)));
+            auto resIt = extrOp->result_begin();
+            for (auto &pair : std::get<3>(t)) {
+                int i = pair.first, j = pair.second;
+                operands[i] = *resIt++;
+                retTypes[j] = operands[i].getType();
+            }
+            extrOps.push_back(extrOp);
+            #ifdef DEBUG
+                extrOp->dump();
+            #endif
+        }
+
+        OperationState opState(op->getLoc(), G::getOperationName());
+        G::build(b, opState, retTypes, operands, {});
+        Operation *newOp = b.createOperation(opState);
+        newStates.append(newOp->result_begin(), op->getNumResults() ? --newOp->result_end()
+                                                                    : newOp->result_end());
+
+        for (access_info &t : regsToExtr) {
+            SmallVector<Value, 2> qbs;
+            for (auto &pair : std::get<3>(t)) {
+                int j = pair.second;
+                qbs.push_back(newOp->getResult(j));
+            }
+            Value reg = extrOps[combOps.size()]->getResults().back();
+            Operation *combOp = buildComb(b, op, reg, qbs, std::get<1>(t),
+                                          b.getI64ArrayAttr(std::get<2>(t)));
+            for (auto &pair : std::get<3>(t)) {
+                int j = pair.second;
+                newStates[j] = combOp->getResult(0);
+            }
+            combOps.push_back(combOp);
+            #ifdef DEBUG
+                extrOp->dump();
+            #endif
+        }
+
+        auto resIt = newStates.begin();
+        for (auto arg : qargs)
+            qbmap[arg] = *resIt++;
+        if (op->getNumResults())
+            op->getResult(0).replaceAllUsesWith(newOp->getResult(retTypes.size()-1));
+        op->erase();
+
+        return newOp;
+    }
+
+    template<class A> static Operation* buildAlloc(OpBuilder &b, value_map &qbmap, Operation *op) {
+        Value ret = op->getResult(0);
+        SmallVector<Type, 1> retTypes(1, convDialectType(b, ret.getType()));
+        SmallVector<Value, 1> operands;
+        SmallVector<NamedAttribute, 1> attrs;
+
+        if (op->getNumOperands())
+            operands.push_back(op->getOperand(0));
+        if (auto attr = op->getAttr("static_size"))
+            attrs.push_back(NamedAttribute(Identifier::get("static_size", b.getContext()), attr));
+
+        OperationState opState(op->getLoc(), A::getOperationName());
+        A::build(b, opState, retTypes, operands, attrs);
+        Operation *newOp = b.createOperation(opState);
+
+        qbmap[ret] = newOp->getResult(0);
+        // can't remove the op yet as it's return value is still needed for the qubit map
+
+        return newOp;
+    }
+
+    template<class F> static Operation* buildFree(OpBuilder &b, value_map &qbmap, Operation *op) {
+        Value arg = op->getOperand(0);
+
+        OperationState opState(op->getLoc(), F::getOperationName());
+        F::build(b, opState, {}, {qbmap[arg]}, {});
+        Operation *newOp = b.createOperation(opState);
+
+        qbmap.erase(arg);
+        op->erase();
+
+        return newOp;
+    }
+
+    template<class M> static Operation* buildMeas(OpBuilder &b, value_map &qbmap, Operation *op,
+                                                  const ValueRange &range,
+                                                  const ArrayAttr &staticRange) {
+        Value arg = op->getOperand(0);
+        Value mres = op->getResult(0);
+        SmallVector<Value, 1> operands(1, qbmap[arg]);
+        SmallVector<Type, 2> retTypes({convDialectType(b, arg.getType()), mres.getType()});
+        Operation *extrOp, *combOp;
+
+        if (staticRange.size() == 1) {
+            extrOp = buildExtr(b, op, qbmap[arg], range, staticRange);
+            operands[0] = extrOp->getResult(0);
+            retTypes[0] = operands[0].getType();
+        }
+
+        OperationState opState(op->getLoc(), M::getOperationName());
+        M::build(b, opState, retTypes, operands, {});
+        Operation *newOp = b.createOperation(opState);
+
+        if (staticRange.size() == 1) {
+            Value reg = extrOp->getResult(1);
+            ValueRange qbs = {newOp->getResults()[0]};
+            combOp = buildComb(b, op, reg, qbs, range, staticRange);
+        }
+
+        qbmap[arg] = staticRange.size() == 1 ? combOp->getResult(0) : newOp->getResult(0);
+        mres.replaceAllUsesWith(newOp->getResult(1));
+        op->erase();
+
+        return newOp;
+    }
+
+    template<class C> static Operation* buildCall(OpBuilder &b, value_map &qbmap, Operation *op) {
+        SmallVector<Value, 4> operands;
+        SmallVector<Value, 4> qargs;
+        SmallVector<Type, 4> resultTypes;
+        SmallVector<NamedAttribute, 1> attrs;
+
+        for (auto arg : op->getOperands()) {
+            if (isQData(arg.getType())) {
+                operands.push_back(qbmap[arg]);
+                qargs.push_back(arg);
+                resultTypes.push_back(qbmap[arg].getType());
+            } else {
+                operands.push_back(arg);
+            }
+        }
+        if (auto attr = op->getAttr("circref"))
+            attrs.push_back(NamedAttribute(Identifier::get("circref", b.getContext()), attr));
+        if (auto array = op->getAttrOfType<ArrayAttr>("size_params")) {
+            auto operIt = operands.begin();
+            for (auto attr : array) {
+                int64_t size = attr.cast<IntegerAttr>().getInt();
+                if (size != -1) {
+                    OperationState auxState(op->getLoc(), ConstantOp::getOperationName());
+                    ConstantOp::build(b, auxState, b.getIndexType(), b.getIndexAttr(size));
+                    operands.insert(operIt, b.createOperation(auxState)->getResult(0));
+                }
+                operIt++;
+            }
+        }
+
+        OperationState opState(op->getLoc(), C::getOperationName());
+        C::build(b, opState, resultTypes, operands, attrs);
+        Operation *newOp = b.createOperation(opState);
+
+        auto resIt = newOp->result_begin();
+        for (auto arg : qargs)
+            qbmap[arg] = *resIt++;
+        op->erase();
+
+        return newOp;
+    }
+
+    template<class T> static Operation* buildTerm(OpBuilder &b, value_map &qbmap, Operation *op,
+                                                  ValueRange args) {
+        SmallVector<Value, 4> states;
+        for (auto arg : args) {
+            if (isQData(arg.getType()))
+                states.push_back(qbmap[arg]);
+        }
+
+        OperationState opState(op->getLoc(), T::getOperationName());
+        T::build(b, opState, ValueRange(states));
+        Operation *newOp = b.createOperation(opState);
+
+        op->erase();
+
+        return newOp;
+    }
+
+    static void gatherUniqueValues(Operation *op, std::unordered_set<Value> &valueSet) {
+        for (auto &region : op->getRegions()) {
+            for (auto &childOp : region.getOps()) {
+                for (auto arg : childOp.getOperands())
+                    if (isQData(arg.getType()))
+                        valueSet.insert(arg);
+                gatherUniqueValues(&childOp, valueSet);
+            }
+        }
+    }
+
+    static void prepControlFlow(Operation *op, OpBuilder &b, value_map &qbmap,
+                                SmallVectorImpl<Value> &uniqueValues,
+                                SmallVectorImpl<Value> &iterArgs) {
+        std::unordered_set<Value> valueSet;
+        gatherUniqueValues(op, valueSet);
+        uniqueValues.append(valueSet.begin(), valueSet.end());
+
+        if (isa<AffineForOp>(op)) {
+            SmallVector<Type, 4> iterTypes;
+            iterTypes.reserve(uniqueValues.size());
+            iterArgs.reserve(uniqueValues.size());
+            for (auto arg : uniqueValues)
+                iterArgs.push_back(qbmap[arg]);
+            for (auto arg : iterArgs)
+                iterTypes.push_back(arg.getType());
+
+            op->insertOperands(op->getNumOperands(), iterArgs);
+            op->getRegion(0).addArguments(iterTypes);
+
+            auto argIt = uniqueValues.begin();
+            for (auto blockArg : op->getRegion(0).getArguments())
+                if (isQSSAData(blockArg.getType()))
+                    qbmap[*argIt++] = blockArg;
+        } else {
+            // prep if/else regions: since we are returning values from the IfOp,
+            // we always need atleast a yield statement in the else region
+            Region &region = op->getRegion(1);
+            cast<scf::IfOp>(op).ensureTerminator(region, b, region.getLoc());
+        }
+    }
+
+    static void finalizeCircuit(Operation *op, Operation *newOp) {
+        // finish up the new function by transfering all operations
+        quantum::CircuitOp circ = cast<quantum::CircuitOp>(op);
+        CircuitOp newCirc = cast<CircuitOp>(newOp);
+        BlockAndValueMapping valmap;
+        valmap.map<Block::BlockArgListType, Block::BlockArgListType>(
+            circ.getArguments(), newCirc.getArguments());
+
+        // the first block needs to be cloned into our existing entry block
+        for (auto &op : circ.front()) {
+            newCirc.front().push_back(op.clone(valmap));
+        }
+
+        circ.erase();
+        #ifdef DEBUG
+            printf("\n -- finalized circuit:\n");
+            newCirc.dump();
+        #endif
     }
 
 public:
     void runOnOperation() override {
         Operation *module = getOperation().getOperation();
         // the op builder can create new ops and types for us
-        OpBuilder opBuilder(module->getContext());
+        OpBuilder b(module->getContext());
+        this->opBuilder = &b;
+        SmallVector<Value, 0> dummy;
 
-        walk(module,
-        [this, &opBuilder] (Operation *op, value_map &qbmap) { // callback
-            // nothing to do for modules
-            if (isa<ModuleOp>(op))
+        walk(module, globalStateMap, dummy,
+        [this, &b] (Operation *op, value_map &qbmap,
+                            const SmallVectorImpl<Value> &uniqueValues,
+                            const SmallVectorImpl<Value> &iterArgs) {
+            #ifdef DEBUG
+                op->dump();
+            #endif
+
+            // nothing to do for operations outside the Quantum dialect
+            if (!isa<quantum::QuantumDialect>(op->getDialect()) &&
+                    !isa<scf::SCFDialect>(op->getDialect()) &&
+                    !isa<AffineDialect>(op->getDialect()))
                 return;
 
             // set up common resources
-            op->print(llvm::errs());
-            opBuilder.setInsertionPoint(op);
-            OperationState opState(op->getLoc(), op->getName());
-            Value phi, heldOp, ctrl, ctrlState, trgt, trgtState; Type retType;
+            b.setInsertionPoint(op);
             Operation *newOp = nullptr;
+            unsigned n;
 
-            if (isa<quantum::AllocOp>(op) || isa<quantum::AllocRegOp>(op)) {
-                if (isa<quantum::AllocOp>(op)) {
-                    opState = OperationState(op->getLoc(), quantumssa::AllocOp::getOperationName());
-                    quantumssa::AllocOp::build(opBuilder, opState, opBuilder.getType<QstateType>());
-                } else {
-                    quantum::AllocRegOp regOp = cast<quantum::AllocRegOp>(op);
-                    IntegerAttr staticSize = regOp.static_sizeAttr();
-                    Type regType = convDialectType(regOp.reg().getType(), opBuilder);
-                    opState = OperationState(op->getLoc(), AllocRegOp::getOperationName());
-                    AllocRegOp::build(opBuilder, opState, regType, regOp.size(), staticSize);
-                }
-                newOp = opBuilder.createOperation(opState);
+            if (isa<quantum::AllocOp>(op)) {
+                newOp = buildAlloc<quantumssa::AllocOp>(b, qbmap, op);
+            } else if (isa<quantum::AllocRegOp>(op)) {
+                newOp = buildAlloc<AllocRegOp>(b, qbmap, op);
 
-                qbmap[op->getOpResult(0)] = newOp->getOpResult(0);
-                // can't remove the op yet as it's return value is still needed for the qubit map
+            } else if (isa<quantum::FreeOp>(op)) {
+                newOp = buildFree<FreeOp>(b, qbmap, op);
+            } else if (isa<quantum::FreeRegOp>(op)) {
+                newOp = buildFree<FreeRegOp>(b, qbmap, op);
 
-            } else if (isa<quantum::HOp>(op) || isa<quantum::XOp>(op) || isa<quantum::RzOp>(op) ||
-                       isa<quantum::ROp>(op) || isa<quantum::CNotOp>(op) ||
-                       isa<quantum::ControlOp>(op) || isa<quantum::AdjointOp>(op)) {
-                // Regroup all quantum "gate" operations here as they have a very similar pattern
-                parseBuildParams(op, qbmap, opBuilder,
-                                 phi, ctrl, ctrlState, trgt, trgtState, heldOp, retType, opState);
+            } else if (auto h = dyn_cast<quantum::HOp>(op)) {
+                newOp = buildGate<HOp>(b, qbmap, op, {h.range()}, {h.static_range()});
+            } else if (auto x = dyn_cast<quantum::XOp>(op)) {
+                newOp = buildGate<XOp>(b, qbmap, op, {x.range()}, {x.static_range()});
+            } else if (auto rz = dyn_cast<quantum::RzOp>(op)) {
+                newOp = buildGate<RzOp>(b, qbmap, op, {rz.range()}, {rz.static_range()});
+            } else if (auto r = dyn_cast<quantum::ROp>(op)) {
+                newOp = buildGate<ROp>(b, qbmap, op, {r.range()}, {r.static_range()});
 
-                if (isa<quantum::HOp>(op))
-                    HOp::build(opBuilder, opState, retType, trgtState);
-                else if (isa<quantum::XOp>(op))
-                    XOp::build(opBuilder, opState, retType, trgtState);
-                else if (isa<quantum::RzOp>(op))
-                    RzOp::build(opBuilder, opState, retType, phi, trgtState);
-                else if (isa<quantum::ROp>(op))
-                    ROp::build(opBuilder, opState, retType, phi, trgtState);
-                else if (isa<quantum::CNotOp>(op))
-                    CNotOp::build(opBuilder, opState, retType, ctrlState, trgtState);
-                else if (isa<quantum::ControlOp>(op))
-                    ControlOp::build(opBuilder, opState, retType, heldOp, ctrlState, trgtState, trgtState); //fix
-                else if (isa<quantum::AdjointOp>(op))
-                    AdjointOp::build(opBuilder, opState, retType, heldOp, trgtState, trgtState); //fix
-                newOp = opBuilder.createOperation(opState);
+            } else if (auto cx = dyn_cast<quantum::CNotOp>(op)) {
+                newOp = buildGate<CNotOp>(b, qbmap, op,
+                    {cx.crange(), cx.qrange()}, {cx.static_crange(), cx.static_qrange()});
+                n = newOp->getNumOperands();
+                newOp->setAttr("operand_segment_sizes", b.getI32VectorAttr({!!n, !!n}));
 
-                // cleanup
-                if (trgt)
-                    qbmap[trgt] = newOp->getOpResult(0);
-                else // if return value is an op, do replace all uses of its SSA value
-                    op->replaceAllUsesWith(newOp);
-                op->erase();
+            } else if (auto sw = dyn_cast<quantum::SwapOp>(op)) {
+                newOp = buildGate<SwapOp>(b, qbmap, op,
+                    {sw.range(), sw.range2()}, {sw.static_range(), sw.static_range2()});
+                n = newOp->getNumOperands();
+                newOp->setAttr("operand_segment_sizes", b.getI32VectorAttr({!!n, !!n}));
 
-            } else if (isa<FuncOp>(op)) {
-                /*FuncOp fn = cast<FuncOp>(op);
+            } else if (auto ctrl = dyn_cast<quantum::ControlOp>(op)) {
+                newOp = buildGate<ControlOp>(b, qbmap, op,
+                    {ctrl.crange(), ctrl.range(), ctrl.range2()},
+                    {ctrl.static_crange(), ctrl.static_range(), ctrl.static_range2()});
+                n = newOp->getNumOperands();
+                newOp->setAttr("operand_segment_sizes", b.getI32VectorAttr({1, 1, n==4, n>=3}));
 
+            } else if (auto adj = dyn_cast<quantum::AdjointOp>(op)) {
+                newOp = buildGate<AdjointOp>(b, qbmap, op,
+                    {adj.range(), adj.range2()}, {adj.static_range(), adj.static_range2()});
+                n = newOp->getNumOperands();
+                newOp->setAttr("operand_segment_sizes", b.getI32VectorAttr({1, n==3, n>=2}));
+
+            } else if (auto m = dyn_cast<quantum::MeasurementOp>(op)) {
+                newOp = buildMeas<MeasurementOp>(b, qbmap, op, m.range(), m.static_range());
+
+            } else if (auto circ = dyn_cast<quantum::CircuitOp>(op)) {
                 // generate new function argument and return type, replace qubit -> state
-                std::vector<Type> inputTypes = fn.getType().getInputs().vec();
-                SmallVector<Type, 4> resultTypes;
+                std::vector<Type> inputTypes = circ.getType().getInputs().vec();
+                SmallVector<Type, 4> returnTypes;
                 for (auto &argType : inputTypes) {
                     if (isQData(argType)) {
-                        auto newType = convDialectType(argType, opBuilder);
-                        argType = newType;
-                        resultTypes.push_back(newType);
+                        argType = convDialectType(b, argType);
+                        returnTypes.push_back(argType);
                     }
                 }
-                FunctionType newType = opBuilder.getFunctionType(inputTypes, resultTypes);
+                FunctionType newType = b.getFunctionType(inputTypes, returnTypes);
 
-                // create new function object with empty entry block (to be populated later)
-                FuncOp::build(opBuilder, opState, fn.getName(), newType, {});
-                newOp = newfn = opBuilder.createOperation(opState);
-                cast<FuncOp>(newOp).addEntryBlock();
+                // create new circuit object with empty entry block (to be populated later)
+                OperationState opState(op->getLoc(), CircuitOp::getOperationName());
+                CircuitOp::build(b, opState, circ.getName(), newType);
+                newOp = circInProg = b.createOperation(opState);
+                CircuitOp newCirc = cast<CircuitOp>(newOp);
+                newCirc.addEntryBlock();
 
                 // add new block argument values to the local storage
-                for (unsigned i = 0; i < cast<FuncOp>(op).getNumArguments(); i++) {
-                    if (isQData(fn.getArgument(i).getType()))
-                        qbmap[fn.getArgument(i)] = cast<FuncOp>(newOp).getArgument(i);
-                }*/
+                for (unsigned i = 0; i < newCirc.getNumArguments(); i++) {
+                    if (isQData(circ.getArgument(i).getType()))
+                        qbmap[circ.getArgument(i)] = newCirc.getArgument(i);
+                }
+
+            } else if (isa<quantum::CircuitValueOp>(op)) {
+                OperationState opState(op->getLoc(), CircuitValueOp::getOperationName());
+                CircuitValueOp::build(b, opState, b.getType<CircType>(),
+                                      op->getAttrOfType<FlatSymbolRefAttr>("circref"));
+                newOp = b.createOperation(opState);
+                op->replaceAllUsesWith(newOp);
+                op->erase();
+
+            } else if (isa<quantum::CallCircOp>(op)) {
+                newOp = buildCall<CallCircOp>(b, qbmap, op);
+            } else if (isa<quantum::ApplyCircOp>(op)) {
+                newOp = buildCall<ApplyCircOp>(b, qbmap, op);
+
+            } else if (auto forOp = dyn_cast<AffineForOp>(op)) {
+                // collect all Qdata ssa values accessed inside to generate return values
+                ValueRange lbOperands = forOp.getLowerBoundOperands();
+                AffineMap lbMap = forOp.getLowerBoundMap();
+                ValueRange ubOperands = forOp.getUpperBoundOperands();
+                AffineMap ubMap = forOp.getUpperBoundMap();
+                int64_t step = forOp.getStep();
+
+                OperationState opState(op->getLoc(), AffineForOp::getOperationName());
+                AffineForOp::build(b, opState, lbOperands, lbMap,
+                                   ubOperands, ubMap, step, iterArgs);
+                newOp = b.createOperation(opState);
+
+                // handle the loop body region
+                BlockAndValueMapping mapping;
+                newOp->getRegion(0).front().erase();
+                op->getRegion(0).cloneInto(&newOp->getRegion(0), mapping);
+
+                auto resIt = newOp->getResults().begin();
+                for (auto arg : uniqueValues) {
+                    qbmap[arg] = *resIt++;
+                }
+
+                op->erase();
+
+            } else if (isa<scf::IfOp>(op)) {
+                // collect all Qdata ssa values accessed inside to generate return values
+                Value cond = op->getOperand(0);
+                SmallVector<Type, 4> returnTypes;
+                for (auto arg : uniqueValues)
+                    returnTypes.push_back(convDialectType(b, arg.getType()));
+
+                OperationState opState(op->getLoc(), scf::IfOp::getOperationName());
+                scf::IfOp::build(b, opState, returnTypes, cond, true);
+                newOp = b.createOperation(opState);
+
+
+                BlockAndValueMapping mapping;
+                newOp->getRegion(0).front().erase();
+                op->getRegion(0).cloneInto(&newOp->getRegion(0), mapping);
+                newOp->getRegion(1).front().erase();
+                op->getRegion(1).cloneInto(&newOp->getRegion(1), mapping);
+
+                auto resIt = newOp->getResults().begin();
+                for (auto arg : uniqueValues) {
+                    qbmap[arg] = *resIt++;
+                }
+
+                op->erase();
 
             } else if (isa<quantum::TerminatorOp>(op)) {
-                /*SmallVector<Value, 4> states;
-                states.reserve(qbmap.size());
-                for (auto &pair : qbmap)
-                    states.push_back(pair.second);
-
-                opState = OperationState(op->getLoc(), ReturnStateOp::getOperationName());
-                ReturnStateOp::build(opBuilder, opState, ValueRange(states));
-                newOp = opBuilder.createOperation(opState);
-
-                op->erase();*/
-
-            } else if (isa<CallOp>(op)) {
-               /* CallOp call = cast<CallOp>(op);
-                FlatSymbolRefAttr callee = call.calleeAttr();
-                FunctionType calleeType = call.getCalleeType();
-                SmallVector<Value, 4> operands;
-                SmallVector<Type, 4> resultTypes;
-                for (auto arg : call.getOperands()) {
-                    if (isQData(arg.getType())) {
-                        operands.push_back(qbmap[arg]);
-                        resultTypes.push_back(convDialectType(arg.getType(), opBuilder));
-                    } else {
-                        operands.push_back(arg);
-                    }
-                }
-
-                CallOp::build(opBuilder, opState, callee, resultTypes, operands);
-                newOp = opBuilder.createOperation(opState);
-
-                for (unsigned i = 0, j = 0; i < call.getNumOperands(); i++) {
-                    if (isQData(op->getOperand(i).getType()))
-                        qbmap[op->getOperand(i)] = newOp->getResult(j++);
-                }
-                op->erase();*/
-
-            } else if (isa<quantum::CircuitOp>(op)) {
-                /*quantum::CircuitOp circOp = cast<quantum::CircuitOp>(op);
-                // collect all external ssa values to generate equivalent function in second step
-                std::unordered_set<Value> uniqueValues;
-                for (auto &childOp : circOp.getOps()) {
-                    for (auto arg : childOp.getOperands()) {
-                        if (arg.getDefiningOp()->getParentOp() != op)
-                            uniqueValues.insert(arg);
-                    }
-                }
-                SmallVector<Value, 4> externalOperands(uniqueValues.begin(), uniqueValues.end());
-
-                // generate new function argument and return types, replace qubit -> state
-                SmallVector<Type, 4> inputTypes; inputTypes.reserve(externalOperands.size());
-                SmallVector<Type, 4> resultTypes;
-                for (auto &arg : externalOperands) {
-                    if (isQData(arg.getType())) {
-                        auto newType = convDialectType(arg.getType(), opBuilder);
-                        inputTypes.push_back(newType);
-                        resultTypes.push_back(newType);
-                    } else {
-                        inputTypes.push_back(arg.getType());
-                    }
-                }
-                FunctionType newType = opBuilder.getFunctionType(inputTypes, resultTypes);
-
-                // create new function object with empty entry block (to be populated later)
-                StringRef name = circOp.name() ?
-                                 circOp.name().getValue() :
-                                 *(new std::string("circ" + std::to_string(numCirc++))); // ok?
-                opState = OperationState(op->getLoc(), FuncOp::getOperationName());
-                FuncOp::build(opBuilder, opState, name, newType, {});
-                newfn = opBuilder.createOperation(opState);
-                cast<FuncOp>(newfn).addEntryBlock();
-
-                // add new block argument values to the local storage
-                for (int i = 0; i < externalOperands.size(); i++) {
-                    if (isQData(externalOperands[i].getType()))
-                        qbmap[externalOperands[i]] = cast<FuncOp>(newfn).getArgument(i);
-                }
-
-                // create the function circuit op
-                FunCircType retType = opBuilder.getType<FunCircType>();
-                opState = OperationState(op->getLoc(), FunCircOp::getOperationName());
-                FunCircOp::build(opBuilder, opState, retType, name, nullptr);
-                newOp = opBuilder.createOperation(opState);
-
-                // add the external operands to the circuit argument cache
-                circArgMap[newOp->getResult(0)] = externalOperands;
-                op->replaceAllUsesWith(newOp);*/
-
-            } else if (false/*parametric circuit op*/) {
-                /*quantum::ParametricCircuitOp parCircOp = cast<quantum::ParametricCircuitOp>(op);
-                FuncOp fun = dyn_cast<FuncOp>(parCircOp.resolveCallable());
-                FunCircType retType = opBuilder.getType<FunCircType>();
-
-                opState = OperationState(op->getLoc(), CircuitOp::getOperationName());
-                CircuitOp::build(opBuilder, opState, retType, fun.getName(), parCircOp.nAttr());
-                newOp = opBuilder.createOperation(opState);
-
-                circArgMap[newOp->getResult(0)] = op->getOperands();
-                op->replaceAllUsesWith(newOp);
-                op->erase();*/
-
-            } else if (isa<quantum::ApplyCircOp>(op)) {
-                /*quantum::ApplyCircOp applyOp = cast<quantum::ApplyCircOp>(op);
-                Operation *circDef = applyOp.circval().getDefiningOp();
-                while (!isa<CircuitOp>(circDef))
-                    circDef = circDef->getOperand(0).getDefiningOp(); // contractualize heldOp at 0
-                CircuitOp fcirc = cast<CircuitOp>(circDef);
-                SmallVector<Value, 4> oldOperands = circArgMap[fcirc.circval()];
-                SmallVector<Value, 4> newOperands;
-
-                if (fcirc.n()) {
-                    opState = OperationState(op->getLoc(), ConstantOp::getOperationName());
-                    auto n = IntegerAttr::get(opBuilder.getIndexType(), fcirc.nAttr().getValue());
-                    ConstantOp::build(opBuilder, opState, n);
-                    Operation *constOp = opBuilder.createOperation(opState);
-                    newOperands.push_back(constOp->getResult(0));
-                }
-
-                for (auto &arg : oldOperands) {
-                    if (isQData(arg.getType()))
-                        newOperands.push_back(qbmap[arg]);
-                    else
-                        newOperands.push_back(arg);
-                }
-
-                TypeAttr fcircTypeAttr = fcirc.resolveCallable()->getAttrOfType<TypeAttr>("type");
-                ArrayRef<Type> retTypes = fcircTypeAttr.getValue().dyn_cast<FunctionType>();
-                opState = OperationState(op->getLoc(), ApplyFunCircOp::getOperationName());
-                ApplyFunCircOp::build(opBuilder, opState, retTypes, applyOp.circ(), newOperands);
-                newOp = opBuilder.createOperation(opState);
-
-                for (int i = 0, j = 0; i < oldOperands.size(); i++) {
-                    if (isQData(oldOperands[i].getType()))
-                        qbmap[oldOperands[i]] = newOp->getResult(j++);
-                }
-                op->erase();*/
+                newOp = buildTerm<ReturnStateOp>(b, qbmap, op,
+                    op->getParentOfType<quantum::CircuitOp>().getArguments());
+            } else if (isa<AffineYieldOp>(op)) {
+                newOp = buildTerm<AffineYieldOp>(b, qbmap, op, uniqueValues);
+            } else if (isa<scf::YieldOp>(op)) {
+                newOp = buildTerm<scf::YieldOp>(b, qbmap, op, uniqueValues);
             }
 
-            if (newOp) {
-                printf(" -- Building new op...\n  ");
-                newOp->dump();
-            } else {
-                printf("\n");
-            }
-        },
-        [this, &opBuilder] (Operation *op) { // cleanup
-            if (isa<FuncOp>(op)) {
-                // finish up the new function by transfering all operations
-                FuncOp fn = cast<FuncOp>(op);
-                BlockAndValueMapping valmap;
-                valmap.map<Block::BlockArgListType, Block::BlockArgListType>(
-                    fn.getArguments(), cast<FuncOp>(newfn).getArguments());
-
-                // the first block needs to be cloned into our existing entry block
-                for (auto &op : fn.front()) {
-                    cast<FuncOp>(newfn).front().push_back(op.clone(valmap));
+            #ifdef DEBUG
+                if (newOp) {
+                    printf(" -- Building new op...\n  ");
+                    newOp->dump();
+                } else {
+                    printf("\n");
                 }
-
-                printf("\n -- finalized function:\n");
-                newfn->dump();
-                op->erase();
-                this->localStateMap.clear();
-            } else if (isa<quantum::CircuitOp>(op)) {
-                // finish up the new function by transfering all operations
-                quantum::CircuitOp circ = cast<quantum::CircuitOp>(op);
-                BlockAndValueMapping valmap;
-
-                // circuits only have one block, clone it into the entry block of the new function
-                for (auto &op : circ.getOps()) {
-                    cast<FuncOp>(newfn).front().push_back(op.clone(valmap));
-                }
-
-                printf("\n -- finalized function:\n");
-                newfn->dump();
-                op->erase();
-                this->localStateMap.clear();
-            }
+            #endif
         });
 
         // at the very end, remove all allocation ops as their values are no longer needed

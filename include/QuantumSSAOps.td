@@ -236,13 +236,6 @@ def ExtractOp : QuantumSSA_Op<"extract", [NoSideEffect]> {
                     return this->emitOpError() << "output reg size != (input reg size - # qubits)!";
         }
 
-        // invalidate register value (no more uses beyond this point)
-        Value::user_range users = this->reg().getUsers();
-        if (dyn_cast_or_null<ExtractOp>(*users.begin()) != *this) {
-            return this->emitError() << "The register operand is invalid beyond this op, "
-                                        "but detected further use!";
-        }
-
         return success();
     }];
 
@@ -311,24 +304,6 @@ def CombineStatOp : QuantumSSA_Op<"scombine", [NoSideEffect]> {
             }
         }
 
-        // invalidate register and qubit values (no more uses beyond this point)
-        Value::user_range users = this->reg().getUsers();
-        if (dyn_cast_or_null<CombineStatOp>(*users.begin()) != *this) {
-            return this->emitError() << "The register operand is invalid beyond this op, "
-                                        "but detected further use!";
-        }
-        for (auto arg : this->qbs()) {
-            Value::user_range users = arg.getUsers();
-            if (dyn_cast_or_null<CombineStatOp>(*users.begin()) != *this) {
-                std::string errMsg("Operand value ");
-                llvm::raw_string_ostream stream(errMsg);
-                AsmState state(this->getParentOp());
-                arg.printAsOperand(stream, state);
-                errMsg += " is invalid beyond this op, but detected further use!";
-                return this->emitError() << errMsg;
-            }
-        }
-
         return success();
     }];
 
@@ -383,24 +358,6 @@ def CombineDynOp : QuantumSSA_Op<"dcombine", [NoSideEffect, SameVariadicOperandS
                     return this->emitOpError() << "output reg size != (input reg size - # qubits)!";
         }
 
-        // invalidate register and qubit values (no more uses beyond this point)
-        Value::user_range users = this->reg().getUsers();
-        if (dyn_cast_or_null<CombineDynOp>(*users.begin()) != *this) {
-            return this->emitError() << "The register operand is invalid beyond this op, "
-                                        "but detected further use!";
-        }
-        for (auto arg : this->qbs()) {
-            Value::user_range users = arg.getUsers();
-            if (dyn_cast_or_null<CombineDynOp>(*users.begin()) != *this) {
-                std::string errMsg("Operand value ");
-                llvm::raw_string_ostream stream(errMsg);
-                AsmState state(this->getParentOp());
-                arg.printAsOperand(stream, state);
-                errMsg += " is invalid beyond this op, but detected further use!";
-                return this->emitError() << errMsg;
-            }
-        }
-
         return success();
     }];
 
@@ -409,7 +366,7 @@ def CombineDynOp : QuantumSSA_Op<"dcombine", [NoSideEffect, SameVariadicOperandS
     }];
 }
 
-def HOp : QuantumSSA_Gate<"H", [Unitary, Hermitian, NoSideEffect]> {
+def HOp : QuantumSSA_Gate<"H", [Unitary, Hermitian]> {
     let summary = "Hadamard gate.";
     let description = [{
         The Hadamard gate is a single Qubit (hermitian) unitary.
@@ -453,7 +410,7 @@ def HOp : QuantumSSA_Gate<"H", [Unitary, Hermitian, NoSideEffect]> {
     }];
 }
 
-def XOp : QuantumSSA_Gate<"X", [Unitary, Hermitian, NoSideEffect]> {
+def XOp : QuantumSSA_Gate<"X", [Unitary, Hermitian]> {
     let summary = "NOT gate.";
     let description = [{
         The NOT gate is a single Qubit (hermitian) unitary.
@@ -497,7 +454,7 @@ def XOp : QuantumSSA_Gate<"X", [Unitary, Hermitian, NoSideEffect]> {
     }];
 }
 
-def RzOp : QuantumSSA_Gate<"RZ", [Unitary, NoSideEffect]> {
+def RzOp : QuantumSSA_Gate<"RZ", [Unitary]> {
     let summary = "Z-Rotation gate.";
     let description = [{
         The Rz gate is a single Qubit unitary.
@@ -544,7 +501,7 @@ def RzOp : QuantumSSA_Gate<"RZ", [Unitary, NoSideEffect]> {
     }];
 }
 
-def ROp : QuantumSSA_Gate<"R", [Unitary, NoSideEffect]> {
+def ROp : QuantumSSA_Gate<"R", [Unitary]> {
     let summary = "Rotation gate.";
     let description = [{
         The R gate is a single Qubit unitary.
@@ -590,7 +547,7 @@ def ROp : QuantumSSA_Gate<"R", [Unitary, NoSideEffect]> {
     }];
 }
 
-def CNotOp : QuantumSSA_Gate<"CX", [Unitary, Hermitian, NoSideEffect, AttrSizedOperandSegments]> {
+def CNotOp : QuantumSSA_Gate<"CX", [Unitary, Hermitian, AttrSizedOperandSegments]> {
     let summary = "CNOT gate.";
     let description = [{
         The CNOT gate is a two Qubit (hermitian) unitary.
@@ -781,6 +738,15 @@ def CircuitOp : QuantumSSA_Op<"circ", [Symbol, FunctionLike, IsolatedFromAbove, 
         // Verifies the body of the function for op specific invariants. Optional.
         LogicalResult verifyBody();
     }];
+
+    let builders = [
+        OpBuilder<"StringRef name, FunctionType type", [{
+            $_state.addAttribute(SymbolTable::getSymbolAttrName(),
+                                 $_builder.getStringAttr(name));
+            $_state.addAttribute(getTypeAttrName(), TypeAttr::get(type));
+            $_state.addRegion();
+        }]>
+    ];
 
     let printer = [{ return ::print(p, *this); }];
     let parser = [{ return ::parse$cppClass(parser, result); }];
@@ -1021,7 +987,7 @@ def ApplyCircOp : QuantumSSA_Op<"apply"> {
     }];
 }
 
-def ControlOp : QuantumSSA_Gate<"ctrl", [Meta, NoSideEffect, AttrSizedOperandSegments]> {
+def ControlOp : QuantumSSA_Gate<"ctrl", [Meta, AttrSizedOperandSegments]> {
     let summary = "Control meta-op.";
     let description = [{
         This meta operation transforms a quantum op that has not been applied
@@ -1140,7 +1106,7 @@ def ControlOp : QuantumSSA_Gate<"ctrl", [Meta, NoSideEffect, AttrSizedOperandSeg
     }];
 }
 
-def AdjointOp : QuantumSSA_Gate<"adj", [Meta, NoSideEffect, AttrSizedOperandSegments]> {
+def AdjointOp : QuantumSSA_Gate<"adj", [Meta, AttrSizedOperandSegments]> {
     let summary = "(Hermitian) adjoint meta-op.";
     let description = [{
         This meta operation transforms a quantum op that has not been applied

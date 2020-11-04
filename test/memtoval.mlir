@@ -3,82 +3,114 @@
 //===------------------------------------------------------------------------------------------===//
 
 %s = constant 8 : index
+%fp = constant 1.0 : f64
 
 // test register operations (extracting qubit, slicing register, combining to register)
 %0 = "q.alloc"() : () -> !q.qubit
 %1 = q.alloc -> !q.qubit
+%99 = q.alloc -> !q.qubit
 
 %2 = q.allocreg(4) -> !q.qureg<4>
-%3 = q.allocreg(%s) : index -> !q.qureg<>
+%3 = q.allocreg(%s) -> !q.qureg<>
 
 // test basic gates, including their custom assembly formats
 q.H %0 : !q.qubit
 q.H %2 : !q.qureg<4>
-%op0 = q.H -> !q.op
+%op0 = q.H -> !q.u1
+q.H %2[0] : !q.qureg<4>
 
 q.X %0 : !q.qubit
 q.X %2 : !q.qureg<4>
-%op2 = q.X -> !q.op
+%op2 = q.X -> !q.u1
+q.X %2[%s] : !q.qureg<4>
 
-%fp = constant 1.0 : f64
 q.RZ(0.1) %0 : !q.qubit
-q.RZ(%fp) %2 : f64, !q.qureg<4>
-%op4 = q.RZ(0.1) -> !q.op
+q.RZ(%fp: f64) %2 : !q.qureg<4>
+%op4 = q.RZ(0.1) -> !q.u1
+q.RZ(%fp: f64) %3[0] : !q.qureg<>
 
-q.R(%fp) %0 : f64, !q.qubit
+q.R(%fp: f64) %0 : !q.qubit
 q.R(0.1) %2 : !q.qureg<4>
-%op5 = q.R(%fp) : f64 -> !q.op
+%op5 = q.R(%fp: f64) -> !q.u1
+q.R(0.1) %3[%s] : !q.qureg<>
 
 q.CX %0, %1 : !q.qubit, !q.qubit
 q.CX %0, %2 : !q.qubit, !q.qureg<4>
-%op6 = q.CX %0 : !q.qubit -> !q.cop<1>
+%op6 = q.CX -> !q.u2
+q.CX %0, %2[0] : !q.qubit, !q.qureg<4>
+q.CX %2[%s], %3[0] : !q.qureg<4>, !q.qureg<>
 
 // create a small test circuit
-%circ0 = q.circ {
-    q.H %0 : !q.qubit
-    q.CX %0, %1 : !q.qubit, !q.qubit
-} -> !q.circ
-q.apply %circ0 : !q.circ
-
-// test a circuit defined via a function
-func @newfun(%n : index, %q : !q.qubit, %r : !q.qureg<4>, %extra : !q.qubit) {
+q.circ @circ0(%q: !q.qubit, %p: !q.qubit) {
     q.H %q : !q.qubit
-    q.CX %q, %r : !q.qubit, !q.qureg<4>
-    %cx = q.CX %q : !q.qubit -> !q.cop<1>
-    q.c %cx, %r : !q.cop<1>, !q.qureg<4> -> !q.cop<5>
-    q.term
+    q.CX %q, %p : !q.qubit, !q.qubit
+}
+q.call @circ0(%0, %1) : !q.qubit, !q.qubit
+
+// test a parametric circuit
+q.circ @newfun(%q : !q.qubit, %q2 : !q.qubit, %r : !q.qureg<>, %n : index, %extra : !q.qubit) {
+    %c1 = constant 1 : index
+    %cond = cmpi "eq", %n, %c1 : index
+
+    affine.for %i = 0 to %n {
+        q.H %q : !q.qubit
+        q.CX %q, %r[%i] : !q.qubit, !q.qureg<>
+
+        scf.if %cond {
+            %cx = q.CX -> !q.u2
+            q.ctrl %cx, %r, %q, %q2 : !q.u2, !q.qureg<>, !q.qubit, !q.qubit
+            q.H %r[0] : !q.qureg<>
+        }
+    }
+
+    scf.if %cond {
+        %cx = q.CX -> !q.u2
+        q.ctrl %cx, %r, %q, %q2 : !q.u2, !q.qureg<>, !q.qubit, !q.qubit
+    } else {
+        q.SWAP %q, %q2 : !q.qubit, !q.qubit
+    }
 }
 %n = constant 5 : index
-call @newfun(%n, %0, %2, %1) : (index, !q.qubit, !q.qureg<4>, !q.qubit) -> ()
-
-%circ = q.parcirc @newfun(3, %0, %2, %1) : !q.qubit, !q.qureg<4>, !q.qubit -> !q.circ
-q.apply %circ : !q.circ
-
-// test true parametric circuit
-func @parfun(%size : index, %q : !q.qubit, %l : !q.qureg<>) {
-    q.H %q : !q.qubit
-    q.CX %q, %l : !q.qubit, !q.qureg<>
-    q.term
-}
-%pcirc = q.parcirc @parfun(3, %0, %2) : !q.qubit, !q.qureg<4> -> !q.circ
-q.apply %pcirc : !q.circ
+%circ = q.getval @newfun -> !q.circ
+q.apply %circ(%0, %1, %2, 5, %99) : !q.circ(!q.qubit, !q.qubit, !q.qureg<4>, !q.qubit)
+q.apply %circ(%0, %1, %2, %n, %99) : !q.circ(!q.qubit, !q.qubit, !q.qureg<4>, index, !q.qubit)
 
 // test control meta operation, including on: ops, cops, and circs
-q.c %op0, %0, %1 : !q.op, !q.qubit, !q.qubit
-q.c %op0, %0, %2 : !q.op, !q.qubit, !q.qureg<4>
-q.c %op0, %2, %1 : !q.op, !q.qureg<4>, !q.qubit
-q.c %op6, %0, %1 : !q.cop<1>, !q.qubit, !q.qubit
-%cop0 = q.c %op0, %0 : !q.op, !q.qubit -> !q.cop<1, !q.op>
-%cop2 = q.c %op6, %0 : !q.cop<1>, !q.qubit -> !q.cop<2>
-%cop4 =  q.c %cop0, %2 : !q.cop<1, !q.op>, !q.qureg<4> -> !q.cop<5, !q.op>
-%cop6 =  q.c %circ, %0 : !q.circ, !q.qubit -> !q.cop<1, !q.circ>
-q.apply %cop6 : !q.cop<1, !q.circ>
+q.ctrl %op0, %0, %1 : !q.u1, !q.qubit, !q.qubit
+q.ctrl %op0, %0, %2 : !q.u1, !q.qubit, !q.qureg<4>
+q.ctrl %op0, %2, %1 : !q.u1, !q.qureg<4>, !q.qubit
+q.ctrl %op6, %0, %1, %2 : !q.u2, !q.qubit, !q.qubit, !q.qureg<4>
+%cop0 = q.ctrl %op0, %0 : !q.u1, !q.qubit -> !q.cop<1, !q.u1>
+%cop2 = q.ctrl %op6, %0 : !q.u2, !q.qubit -> !q.cop<1, !q.u2>
+%cop4 =  q.ctrl %cop0, %2 : !q.cop<1, !q.u1>, !q.qureg<4> -> !q.cop<5, !q.u1>
+%cop6 =  q.ctrl %circ, %0 : !q.circ, !q.qubit -> !q.cop<1, !q.circ>
+q.apply %cop6(%0, %1, %2, 5, %99) : !q.cop<1, !q.circ>(!q.qubit, !q.qubit, !q.qureg<4>, !q.qubit)
 
 // test adjoint meta operation
-q.adj %op0, %0 : !q.op, !q.qubit
-q.adj %op0, %2 : !q.op, !q.qureg<4>
-q.adj %cop0, %0 : !q.cop<1, !q.op>, !q.qubit
-%aop0 = q.adj %op0 : !q.op -> !q.op
+q.adj %op0, %0 : !q.u1, !q.qubit
+q.adj %op0, %2 : !q.u1, !q.qureg<4>
+q.adj %cop0, %0 : !q.cop<1, !q.u1>, !q.qubit
+%aop0 = q.adj %op0 : !q.u1 -> !q.u1
 %aop2 = q.adj %circ : !q.circ -> !q.circ
-%aop4 = q.adj %cop0 : !q.cop<1, !q.op> -> !q.cop<1, !q.op>
-q.apply %aop2 : !q.circ
+%aop4 = q.adj %cop0 : !q.cop<1, !q.u1> -> !q.cop<1, !q.u1>
+q.apply %aop2(%0, %1, %2, %n, %99) : !q.circ(!q.qubit, !q.qubit, !q.qureg<4>, index, !q.qubit)
+
+// test global affine loop
+affine.for %i = 0 to 4 {
+    q.H %0 : !q.qubit
+    q.CX %0, %2[%i] : !q.qubit, !q.qureg<4>
+}
+
+// single register multiple access
+q.SWAP %2[0], %2[1] : !q.qureg<4>, !q.qureg<4>
+
+// measurement
+q.meas %0 : !q.qubit -> i1
+q.meas %2 : !q.qureg<4> -> memref<4xi1>
+q.meas %2[0] : !q.qureg<4> -> i1
+
+q.freereg %3 : !q.qureg<>
+q.freereg %2 : !q.qureg<4>
+q.free %99 : !q.qubit
+q.free %1 : !q.qubit
+q.free %0 : !q.qubit

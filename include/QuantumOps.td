@@ -432,10 +432,10 @@ def ROp : Quantum_Gate<"R", [Unitary, AttrSizedOperandSegments]> {
 
     let arguments = (ins
         Optional<AnyFloat> : $phi,
+        OptionalAttr<F64Attr> : $static_phi,
         Optional<QData_Type> : $qbs,
         Variadic<Index> : $range,
-        I64ArrayAttr : $static_range,
-        OptionalAttr<APFloatAttr> : $static_phi
+        I64ArrayAttr : $static_range
     );
 
     let results = (outs
@@ -664,6 +664,15 @@ def CircuitOp : Quantum_Op<"circ", [Symbol, FunctionLike, IsolatedFromAbove,
         // Verifies the body of the function for op specific invariants. Optional.
         //LogicalResult verifyBody();
     }];
+
+    let builders = [
+        OpBuilder<"StringRef name, FunctionType type", [{
+            $_state.addAttribute(SymbolTable::getSymbolAttrName(),
+                                 $_builder.getStringAttr(name));
+            $_state.addAttribute(getTypeAttrName(), TypeAttr::get(type));
+            $_state.addRegion();
+        }]>
+    ];
 
     let printer = [{ return ::print(p, *this); }];
     let parser = [{ return ::parse$cppClass(parser, result); }];
