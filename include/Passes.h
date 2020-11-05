@@ -5,6 +5,7 @@ namespace mlir {
 namespace quantum {
 
 std::unique_ptr<Pass> createMemToValPass();
+std::unique_ptr<Pass> createQuantumGateOptimizationPass();
 
 } // end namespace quantum
 } // end namespace mlir

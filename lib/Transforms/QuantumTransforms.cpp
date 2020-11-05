@@ -1193,11 +1193,445 @@ public:
         }
     }
 };
+
+
+//===------------------------------------------------------------------------------------------===//
+// Quantum Peephole Optimization Patterns
+//===------------------------------------------------------------------------------------------===//
+
+// general rewrite pattern that cancels two successive hermitian ops
+struct HermitianCancel : public RewritePattern {
+    // Constructor: benefit = "how much computation" the transformation saves
+    HermitianCancel(PatternBenefit benefit) : RewritePattern(benefit, MatchAnyOpTypeTag()) {}
+
+    // match an op if it has the hermitian trait
+    LogicalResult matchAndRewrite(Operation *op, PatternRewriter &rewriter) const override {
+        if (!op->hasTrait<OpTrait::HermitianTrait>())
+            return failure();
+
+        // all quantum data arguments must have originated from a single op of the same type
+        Operation *parent = nullptr;
+        for (auto arg : op->getOperands()) {
+            if (isQSSAData(arg.getType())) {
+                if (!parent) {
+                    parent = arg.getDefiningOp();
+                    if (!parent || parent->getName() != op->getName()
+                                || op->getParentRegion() != parent->getParentRegion())
+                        return failure();
+                } else {
+                    if (arg.getDefiningOp() != parent)
+                        return failure();
+                }
+            }
+        }
+        if (!parent)
+            return failure();
+
+        // assume return values consist exclusively of updated qubit/register states
+        llvm::SmallVector<Value, 2> replacementValues;
+        for (Value arg : parent->getOperands()) {
+            if (isQSSAData(arg.getType()))
+                replacementValues.push_back(arg);
+        }
+
+        rewriter.replaceOp(op, replacementValues);
+        rewriter.eraseOp(parent);
+
+        return success();
+    }
+};
+
+struct AdjointCancelBw : public OpRewritePattern<AdjointOp> {
+    // Constructor: benefit = "how much computation" the transformation saves
+    AdjointCancelBw(MLIRContext *context) : OpRewritePattern<AdjointOp>(context, /*benefit=*/2) {}
+
+    // Match (op - adjoint) and (heldOp - adjoint) pattern
+    LogicalResult match(AdjointOp adj) const override {
+        // both quantum data arguments must originate from the same op
+        Operation *qbParent = nullptr;
+        if (adj.qbs()) {
+            qbParent = adj.qbs().getDefiningOp();
+            if (!qbParent || adj.qbs2() && adj.qbs2().getDefiningOp() != qbParent)
+                return failure();
+            if (adj.getParentRegion() != qbParent->getParentRegion())
+                return failure();
+        } else {
+            return failure();
+        }
+
+        // held op argument should be of same op type as qdata parent
+        Operation *opParent = adj.heldOp().getDefiningOp();
+        if (!opParent || qbParent->getName() != opParent->getName())
+            return failure();
+
+        // if any extra args, they need to be the same. possible: rot gates, adj, ctrl
+        // opParent has mandatory args only: e.g. rot angle, held ops, ctrl qubits
+        // qbParent has mandatory plus the ones already checked above
+        if (auto ctrlOp = dyn_cast<ControlOp>(opParent)) {
+            ControlOp parentCtrlOp = cast<ControlOp>(qbParent);
+            if (ctrlOp.heldOp() != parentCtrlOp.heldOp())
+                return failure();
+            if (ctrlOp.ctrls() != parentCtrlOp.new_ctrls())
+                return failure();
+        } else if (auto adjOp = dyn_cast<AdjointOp>(opParent)) {
+            AdjointOp parentAdjOp = cast<AdjointOp>(qbParent);
+            if (adjOp.heldOp() != parentAdjOp.heldOp())
+                return failure();
+        } else if (auto rzOp = dyn_cast<RzOp>(opParent)) {
+            RzOp parentRzOp = cast<RzOp>(qbParent);
+            if (rzOp.phi() != parentRzOp.phi())
+                return failure();
+        } else if (auto rOp = dyn_cast<ROp>(opParent)) {
+            ROp parentROp = cast<ROp>(qbParent);
+            if (rOp.phi() != parentROp.phi())
+                return failure();
+        }
+
+        return success();
+    }
+
+    void rewrite(AdjointOp adj, PatternRewriter &rewriter) const override {
+        // get op to which this adjoint is the inverse
+        Operation *parent = adj.qbs().getDefiningOp();
+
+        // get original state values, qdata args are always last
+        SmallVector<Value, 2> origStates;
+        if (adj.qbs2())
+            origStates.push_back(parent->getOperands().drop_back().back());
+        origStates.push_back(parent->getOperands().back());
+
+        // erase adjoint then parent
+        rewriter.replaceOp(adj, origStates);
+        if (auto ctrl = dyn_cast<ControlOp>(parent))
+            rewriter.replaceOp(ctrl, {ctrl.ctrls(), nullptr});
+        else
+            rewriter.eraseOp(parent);
+    }
+};
+
+struct AdjointCancelFw : public RewritePattern {
+    // Constructor: benefit = "how much computation" the transformation saves
+    AdjointCancelFw(PatternBenefit benefit) : RewritePattern(benefit, MatchAnyOpTypeTag()) {}
+
+    // Match (heldOp - adjoint - op) pattern
+    LogicalResult match(Operation *op) const override {
+        if (!op->hasTrait<OpTrait::HermitianTrait>() && !op->hasTrait<OpTrait::MetaOpTrait>())
+            return failure();
+
+        // check if parent is an adjoint op
+        // qdata args always last, ctrl might have qdata but no application
+        Operation *parent;
+        if (op->getNumOperands() && isQSSAData(op->getOperands().back().getType())) {
+            if (isa<ControlOp>(op) && op->getNumOperands() < 3)
+                return failure();
+            parent = op->getOperands().back().getDefiningOp();
+            if (!parent || !isa<AdjointOp>(parent)
+                        || op->getParentRegion() != parent->getParentRegion())
+                return failure();
+        } else {
+            return failure();
+        }
+        AdjointOp adj = cast<AdjointOp>(parent);
+
+        // both quantum data arguments must originate from the same op
+        if (adj.qbs2() && (op->getNumOperands() < 2 ||
+                           !isQSSAData(op->getOperands().drop_back().back().getType()) ||
+                           op->getOperands().drop_back().back().getDefiningOp() != parent))
+            return failure();
+
+        // held op argument (of adjoint) should be of same op type as this
+        Operation *opParent = adj.heldOp().getDefiningOp();
+        if (!opParent || op->getName() != opParent->getName())
+            return failure();
+
+        // if any extra args, they need to be the same. possible: rot gates, adj, ctrl
+        // opParent has mandatory args only: e.g. rot angle, held ops, ctrl qubits
+        // (this) op has mandatory plus the ones already checked above
+        if (auto ctrlOp = dyn_cast<ControlOp>(op)) {
+            ControlOp parentCtrlOp = cast<ControlOp>(opParent);
+            if (ctrlOp.heldOp() != parentCtrlOp.heldOp())
+                return failure();
+            if (ctrlOp.ctrls() != parentCtrlOp.new_ctrls())
+                return failure();
+        } else if (auto adjOp = dyn_cast<AdjointOp>(op)) {
+            AdjointOp parentAdjOp = cast<AdjointOp>(opParent);
+            if (adjOp.heldOp() != parentAdjOp.heldOp())
+                return failure();
+        } else if (auto rzOp = dyn_cast<RzOp>(op)) {
+            RzOp parentRzOp = cast<RzOp>(opParent);
+            if (rzOp.phi() != parentRzOp.phi())
+                return failure();
+        } else if (auto rOp = dyn_cast<ROp>(op)) {
+            ROp parentROp = cast<ROp>(opParent);
+            if (rOp.phi() != parentROp.phi())
+                return failure();
+        }
+
+        return success();
+    }
+
+    void rewrite(Operation *op, PatternRewriter &rewriter) const override {
+        // get the adjoint parent op
+        AdjointOp adj = cast<AdjointOp>(op->getOperands().back().getDefiningOp());
+
+        // get original state values
+        SmallVector<Value, 3> origStates;
+        if (auto ctrl = dyn_cast<ControlOp>(op))
+            origStates.push_back(ctrl.ctrls());
+        if (adj.qbs2())
+            origStates.push_back(adj.qbs2());
+        origStates.push_back(adj.qbs());
+
+        // erase this op then parent adjoint
+        rewriter.replaceOp(op, origStates);
+        rewriter.eraseOp(adj);
+    }
+};
+
+struct CircuitCancelBw : public OpRewritePattern<ApplyCircOp> {
+    // Constructor: benefit = "how much computation" the transformation saves
+    CircuitCancelBw(MLIRContext *context) : OpRewritePattern<ApplyCircOp>(context, /*benefit=*/5) {}
+
+    // Match (circuit - getval - adjoint - apply) and (circuit - call - apply) pattern
+    LogicalResult match(ApplyCircOp apply) const override {
+        SmallVector<Value, 4> nonQArgs;
+
+        // all quantum data arguments must originate from the same call op
+        Operation *parent = nullptr;
+        for (auto arg : apply.args()) {
+            if (isQSSAData(arg.getType())) {
+                if (!parent) {
+                    parent = arg.getDefiningOp();
+                    if (!parent || !isa<CallCircOp>(parent)
+                                || apply.getParentRegion() != parent->getParentRegion())
+                        return failure();
+                } else if (arg.getDefiningOp() != parent) {
+                    return failure();
+                }
+            } else {
+                nonQArgs.push_back(arg);
+            }
+        }
+        CallCircOp call = cast<CallCircOp>(parent);
+
+        // check both ops reference the same circuit, with an intermediate adjoint
+        if (auto adj = dyn_cast_or_null<AdjointOp>(apply.circval().getDefiningOp())) {
+            if (auto getval = dyn_cast_or_null<CircuitValueOp>(adj.heldOp().getDefiningOp())) {
+                if (getval.circref() != call.circref())
+                    return failure();
+            } else {
+                return failure();
+            }
+        } else {
+            return failure();
+        }
+
+        // finally remaining arguments should be identitical
+        auto nonQArgsIt = nonQArgs.begin();
+        for (auto arg : call.args()) {
+            if (!isQSSAData(arg.getType()))
+                if (arg != *nonQArgsIt++)
+                    return failure();
+        }
+
+        return success();
+    }
+
+    void rewrite(ApplyCircOp apply, PatternRewriter &rewriter) const override {
+        // get call op
+        Operation *callOp = nullptr;
+        auto argsIt = apply.args().begin();
+        while (!callOp) {
+            if (isQSSAData((*argsIt).getType()))
+                callOp = (*argsIt).getDefiningOp();
+            argsIt++;
+        }
+
+        // get original state values
+        SmallVector<Value, 4> origStates;
+        for (auto arg : callOp->getOperands())
+            if (isQSSAData(arg.getType()))
+                origStates.push_back(arg);
+
+        // erase call then apply
+        rewriter.replaceOp(apply, origStates);
+        rewriter.eraseOp(callOp);
+    }
+};
+
+struct CircuitCancelFw : public OpRewritePattern<CallCircOp> {
+    // Constructor: benefit = "how much computation" the transformation saves
+    CircuitCancelFw(MLIRContext *context) : OpRewritePattern<CallCircOp>(context, /*benefit=*/5) {}
+
+    // Match (circuit - getval - adjoint - apply - call) and (circuit - call) pattern
+    LogicalResult match(CallCircOp call) const override {
+        SmallVector<Value, 4> nonQArgs;
+
+        // all quantum data arguments must originate from the same apply op
+        Operation *parent = nullptr;
+        for (auto arg : call.args()) {
+            if (isQSSAData(arg.getType())) {
+                if (!parent) {
+                    parent = arg.getDefiningOp();
+                    if (!parent || !isa<ApplyCircOp>(parent)
+                                || call.getParentRegion() != parent->getParentRegion())
+                        return failure();
+                } else if (arg.getDefiningOp() != parent) {
+                    return failure();
+                }
+            } else {
+                nonQArgs.push_back(arg);
+            }
+        }
+        ApplyCircOp apply = cast<ApplyCircOp>(parent);
+
+        // check both ops reference the same circuit, with an intermediate adjoint
+        if (auto adj = dyn_cast_or_null<AdjointOp>(apply.circval().getDefiningOp())) {
+            if (auto getval = dyn_cast_or_null<CircuitValueOp>(adj.heldOp().getDefiningOp())) {
+                if (getval.circref() != call.circref())
+                    return failure();
+            } else {
+                return failure();
+            }
+        } else {
+            return failure();
+        }
+
+        // finally remaining arguments should be identitical
+        auto nonQArgsIt = nonQArgs.begin();
+        for (auto arg : apply.args()) {
+            if (!isQSSAData(arg.getType()))
+                if (arg != *nonQArgsIt++)
+                    return failure();
+        }
+
+        return success();
+    }
+
+    void rewrite(CallCircOp call, PatternRewriter &rewriter) const override {
+        // get call op
+        Operation *applyOp = nullptr;
+        auto argsIt = call.args().begin();
+        while (!applyOp) {
+            if (isQSSAData((*argsIt).getType()))
+                applyOp = (*argsIt).getDefiningOp();
+            argsIt++;
+        }
+
+        // get original state values
+        SmallVector<Value, 4> origStates;
+        for (auto arg : applyOp->getOperands())
+            if (isQSSAData(arg.getType()))
+                origStates.push_back(arg);
+
+        // erase call then apply
+        rewriter.replaceOp(call, origStates);
+        rewriter.eraseOp(applyOp);
+    }
+};
+
+// two successive rotation gates can be combined together and their angles added
+template<class R> struct FoldRotation : public OpRewritePattern<R> {
+    // Constructor: benefit = "how much computation" the transformation saves
+    FoldRotation(MLIRContext *context) : OpRewritePattern<R>(context, /*benefit=*/1) {}
+
+    // match (rz - rz) pattern
+    LogicalResult matchAndRewrite(R op2, PatternRewriter &rewriter) const override {
+        if (!op2.qbs())
+            return failure();
+
+        R op1 = dyn_cast_or_null<R>(op2.qbs().getDefiningOp());
+        if (!op1)
+            return failure();
+
+        if (op1.getParentRegion() != op2.getParentRegion())
+            return failure();
+
+        rewriter.setInsertionPoint(op1);
+        OperationState addState(op1.getLoc(), AddFOp::getOperationName());
+        AddFOp::build(rewriter, addState, op1.phi(), op2.phi());
+        Operation *addOp = rewriter.createOperation(addState);
+
+        rewriter.startRootUpdate(op2);
+        op2.setOperand(0, addOp->getResult(0)); // phi1 + phi2
+        op2.setOperand(1, op1.qbs());
+        rewriter.finalizeRootUpdate(op2);
+        rewriter.eraseOp(op1);
+
+        return success();
+    }
+};
+
+// remove circuit adjoints that have no more uses
+struct FoldDanglingControl : public OpRewritePattern<ControlOp> {
+    // Constructor: benefit = "how much computation" the transformation saves
+    FoldDanglingControl(MLIRContext *context) : OpRewritePattern<ControlOp>(context, /*benefit=*/1) {}
+
+    // Matching logic
+    LogicalResult matchAndRewrite(ControlOp ctrl, PatternRewriter &rewriter) const override {
+        if (!ctrl.qbs() && ctrl.res().getUses().empty()) {
+            rewriter.replaceOp(ctrl, {ctrl.ctrls(), nullptr});
+            return success();
+        }
+
+        return failure();
+    }
+};
+
+// remove circuit adjoints that have no more uses
+struct FoldDanglingAdjoint : public OpRewritePattern<AdjointOp> {
+    // Constructor: benefit = "how much computation" the transformation saves
+    FoldDanglingAdjoint(MLIRContext *context) : OpRewritePattern<AdjointOp>(context, /*benefit=*/1) {}
+
+    // Matching logic
+    LogicalResult matchAndRewrite(AdjointOp adj, PatternRewriter &rewriter) const override {
+        if (!adj.qbs() && adj.res().getUses().empty()) {
+            rewriter.eraseOp(adj);
+            return success();
+        }
+
+        return failure();
+    }
+};
+
+struct QuantumGateOptimizationPass : public OperationPass<ModuleOp> {
+    QuantumGateOptimizationPass()
+        : OperationPass<ModuleOp>(TypeID::get<QuantumGateOptimizationPass>()) {}
+    QuantumGateOptimizationPass(const QuantumGateOptimizationPass &)
+        : OperationPass<ModuleOp>(TypeID::get<QuantumGateOptimizationPass>()) {}
+
+    StringRef getName() const {
+        return "QuantumGateOptimizationPass";
+    }
+
+    std::unique_ptr<Pass> clonePass() const {
+        return std::make_unique<QuantumGateOptimizationPass>(*this);
+    }
+
+    void runOnOperation() override {
+        MLIRContext &context = getContext();
+
+        OwningRewritePatternList patterns;
+        patterns.insert<HermitianCancel>(2);
+        patterns.insert<AdjointCancelBw>(&context);
+        patterns.insert<AdjointCancelFw>(2);
+        patterns.insert<CircuitCancelBw>(&context);
+        patterns.insert<CircuitCancelFw>(&context);
+        patterns.insert<FoldRotation<RzOp>>(&context);
+        patterns.insert<FoldRotation<ROp>>(&context);
+
+        applyPatternsAndFoldGreedily(getOperation(), patterns);
+    }
+};
 } // end namespace
 
 // Pass creation functions declared in Passes.h
 std::unique_ptr<Pass> quantum::createMemToValPass() {
     return std::make_unique<MemToValPass>();
+}
+
+std::unique_ptr<Pass> quantum::createQuantumGateOptimizationPass() {
+    return std::make_unique<QuantumGateOptimizationPass>();
 }
 
 // Register all patterns for rewrite by the Canonicalization framework
@@ -1212,4 +1646,15 @@ void CombineStatOp::getCanonicalizationPatterns(OwningRewritePatternList &patter
     patterns.insert<CombineCombinePatt>(3, context);
     patterns.insert<CombineExtractCombinePatt>(1, context);
     patterns.insert<ExtractCombinePatt>(2, context);
+}
+
+void ControlOp::getCanonicalizationPatterns(OwningRewritePatternList &patterns,
+                                            MLIRContext *context) {
+    patterns.insert<FoldDanglingControl>(context);
+}
+
+
+void AdjointOp::getCanonicalizationPatterns(OwningRewritePatternList &patterns,
+                                            MLIRContext *context) {
+    patterns.insert<FoldDanglingAdjoint>(context);
 }

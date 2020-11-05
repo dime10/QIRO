@@ -1104,6 +1104,8 @@ def ControlOp : QuantumSSA_Gate<"ctrl", [Meta, AttrSizedOperandSegments]> {
         custom<OneOrTwoQbs>($qbs2, $qbs)
         attr-dict `:` type(operands) `->` type(results)
     }];
+
+    let hasCanonicalizer = 1;
 }
 
 def AdjointOp : QuantumSSA_Gate<"adj", [Meta, AttrSizedOperandSegments]> {
@@ -1178,6 +1180,8 @@ def AdjointOp : QuantumSSA_Gate<"adj", [Meta, AttrSizedOperandSegments]> {
     let assemblyFormat = [{
         $heldOp custom<OneOrTwoQbs>($qbs2, $qbs) attr-dict `:` type(operands) `->` type(results)
     }];
+
+    let hasCanonicalizer = 1;
 }
 
 def MeasurementOp : QuantumSSA_Op<"meas"> {
