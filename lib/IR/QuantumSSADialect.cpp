@@ -8,12 +8,84 @@
 #include "llvm/ADT/TypeSwitch.h"
 #include "llvm/ADT/StringSwitch.h"
 
+#include "InliningUtils.h"
 #include "QuantumSSADialect.h"
 
 using namespace mlir;
 using namespace mlir::quantumssa;
 
 #define EMIT_ERROR(p, m) p.emitError(p.getCurrentLocation(), m)
+
+
+//===------------------------------------------------------------------------------------------===//
+// Inlining Interface
+//===------------------------------------------------------------------------------------------===//
+
+// This class defines the interface for handling inlining with QuantumSSA operations.
+// We simply inherit from the base interface class and override the necessary methods.
+struct QuantumSSAInlinerInterface : public DialectInlinerInterface {
+    using DialectInlinerInterface::DialectInlinerInterface;
+
+    // Returns true if the given region 'src' can be inlined into the region 'dest' that is attached
+    // to an operation registered to the current dialect. 'valueMapping' contains any remapped
+    // values from within the 'src' region. This can be used to examine what values will
+    // replace entry arguments into the 'src' region for example.
+    bool isLegalToInline(Region *dest, Region *src, BlockAndValueMapping &mapping) const final {
+        if (src->getParentOp()->getAttr("no_inline"))
+            return false;
+        return true;
+    }
+
+    // Returns true if the given operation 'op', that is registered to this dialect, can be inlined
+    // into the given region, false otherwise. 'valueMapping' contains any remapped values from
+    // within the 'src' region. This can be used to examine what values may potentially replace the
+    // operands to 'op'.
+    bool isLegalToInline(Operation *op, Region *region, BlockAndValueMapping &mapping) const final {
+        return true;
+    }
+
+    // Handle the given inlined terminator by replacing it with a new operation as necessary. This
+    // overload is called when the inlined region has more than one block. The 'newDest' block
+    // represents the new final branching destination of blocks within this region, i.e. operations
+    // that release control to the parent operation will likely now branch to this block. Its block
+    // arguments correspond to any values that need to be replaced by terminators within the
+    // inlined region.
+    void handleTerminator(Operation *op, Block *newDest) const final {
+        assert(isa<ReturnStateOp>(op) && "encoutered unknown terminator!");
+        llvm_unreachable("Terminator inline call: More than one block!");
+    }
+
+    // This hook is called when a terminator operation has been inlined. The only terminator in the
+    // QuantumSSA dialect is the qs.return operation.
+    void handleTerminator(Operation *op, ArrayRef<Value> valuesToRepl) const final {
+        assert(isa<ReturnStateOp>(op) && "encoutered unknown terminator!");
+        assert(op->getNumOperands() == valuesToRepl.size() && "# return values mismatch!");
+
+        // Replace the values directly with the return operands.
+        for (const auto &it : llvm::enumerate(op->getOperands()))
+            valuesToRepl[it.index()].replaceAllUsesWith(it.value());
+    }
+
+    // Attempt to materialize a conversion for a type mismatch between a call from this dialect,
+    // and a callable region. This method should generate an operation that takes as 'input' the
+    // only operand, and produces a single result of 'resultType'. If a conversion can not be
+    // generated, nullptr should be returned.
+    // NOTE: This hook may be invoked before the 'isLegal' checks above.
+    Operation* materializeCallConversion(OpBuilder &builder, Value input, Type resultType,
+                                         Location conversionLoc) const {
+        if (!input.getType().isa<RstateType>() || !resultType.isa<RstateType>() ||
+                !input.getType().cast<RstateType>().getNumQubits() ||
+                resultType.cast<RstateType>().getNumQubits())
+            return nullptr;
+
+        OperationState castState(conversionLoc, CastRegOp::getOperationName());
+        CastRegOp::build(builder, castState, resultType, input);
+        Operation *cast = builder.createOperation(castState);
+
+        return cast;
+    }
+};
+
 
 //===------------------------------------------------------------------------------------------===//
 // Dialect Definitions
@@ -27,6 +99,7 @@ void QuantumSSADialect::initialize() {
     >();
 
     addTypes<QstateType, RstateType, U1Type, U2Type, COpType, CircType>();
+    addInterfaces<QuantumSSAInlinerInterface>();
 }
 
 namespace mlir {

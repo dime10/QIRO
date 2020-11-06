@@ -112,7 +112,7 @@ func @calc_shor_angle(%i: index, %j: index) -> f64 {
 }
 
 // quantum fourier transform on register r
-q.circ @QFT(%r: !q.qureg<>, %n : index) {
+q.circ @QFT(%r: !q.qureg<>, %n : index) attributes {no_inline} {
     %c1 = constant 1 : index
     %c2 = constant 2 : index
 

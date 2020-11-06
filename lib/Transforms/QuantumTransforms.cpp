@@ -564,6 +564,8 @@ public:
                 // create new circuit object with empty entry block (to be populated later)
                 OperationState opState(op->getLoc(), CircuitOp::getOperationName());
                 CircuitOp::build(b, opState, circ.getName(), newType);
+                if (circ.no_inline())
+                    opState.addAttribute("no_inline", b.getUnitAttr());
                 newOp = circInProg = b.createOperation(opState);
                 CircuitOp newCirc = cast<CircuitOp>(newOp);
                 newCirc.addEntryBlock();

@@ -106,6 +106,25 @@ def AllocRegOp : Quantum_Op<"allocreg", [NoSideEffect]> {
     }];
 }
 
+def CastRegOp : Quantum_Op<"cast"> {
+    let summary = "Register-size type cast.";
+
+    let arguments = (ins Qureg_Type);
+    let results = (outs Qureg_Type);
+
+    let verifier = [{
+        if (!this->getOperand().getType().cast<QuregType>().getNumQubits())
+            return this->emitOpError() << "needs static-size register as input!";
+        if (this->getResult().getType().cast<QuregType>().getNumQubits())
+            return  this->emitOpError() << "needs to return dynamic-size register!";
+        return success();
+    }];
+
+    let assemblyFormat = [{
+        operands attr-dict `:` type(operands) `to` type(results)
+    }];
+}
+
 def FreeOp : Quantum_Op<"free"> {
     let summary = "Deallocate a qubit.";
     let description = [{
@@ -636,6 +655,10 @@ def CircuitOp : Quantum_Op<"circ", [Symbol, FunctionLike, IsolatedFromAbove,
         }
         ```
     }];
+
+    let arguments = (ins
+        UnitAttr : $no_inline
+    );
 
     let regions = (region
         AnyRegion : $gates

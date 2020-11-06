@@ -28,6 +28,9 @@ int main(int argc, char **argv) {
     mlir::registerPass("quantum-gate-opt",
                        "Run the greddy driver on a variety of patterns to optimize quantum gates.",
                        mlir::quantum::createQuantumGateOptimizationPass);
+    mlir::registerPass("circuit-inline",
+                       "Inline circuit calls",
+                       mlir::quantum::createCircuitInlinerPass);
 
     mlir::DialectRegistry registry;
     // Below we selectively register all dialects that might show up in the input file.

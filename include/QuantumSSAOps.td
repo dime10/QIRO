@@ -111,6 +111,25 @@ def AllocRegOp : QuantumSSA_Op<"allocreg", [NoSideEffect]> {
     }];
 }
 
+def CastRegOp : QuantumSSA_Op<"cast"> {
+    let summary = "Register-size type cast.";
+
+    let arguments = (ins Rstate_Type);
+    let results = (outs Rstate_Type);
+
+    let verifier = [{
+        if (!this->getOperand().getType().cast<RstateType>().getNumQubits())
+            return this->emitOpError() << "needs static-size register as input!";
+        if (this->getResult().getType().cast<RstateType>().getNumQubits())
+            return  this->emitOpError() << "needs to return dynamic-size register!";
+        return success();
+    }];
+
+    let assemblyFormat = [{
+        operands attr-dict `:` type(operands) `to` type(results)
+    }];
+}
+
 def FreeOp : QuantumSSA_Op<"free"> {
     let summary = "Deallocate a qubit.";
     let description = [{
@@ -711,6 +730,10 @@ def CircuitOp : QuantumSSA_Op<"circ", [Symbol, FunctionLike, IsolatedFromAbove, 
         }
         ```
     }];
+
+    let arguments = (ins
+        UnitAttr : $no_inline
+    );
 
     let regions = (region
         AnyRegion : $gates
