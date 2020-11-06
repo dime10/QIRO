@@ -347,8 +347,12 @@ LogicalResult CircuitOp::verifyType() {
 
 LogicalResult CircuitOp::verifyBody() {
     Operation *term = this->gates().front().getTerminator();
-    if (cast<ReturnStateOp>(term).retvals().getType() != this->getType().getResults())
-        return this->emitOpError() << "must return updated state for all QData arguments!";
+    if (auto ret = dyn_cast<ReturnStateOp>(term)) {
+        if (ret.retvals().getType() != this->getType().getResults())
+            return this->emitOpError() << "must return updated state for all QData arguments!";
+    } else {
+            return this->emitOpError() << "terminator must be ReturnStateOp!";
+    }
 
     return success();
 };
@@ -359,7 +363,7 @@ Region *CircuitOp::getCallableRegion() {
 }
 
 ArrayRef<Type> CircuitOp::getCallableResults() {
-    return {};
+    return getType().getResults();
 }
 
 // The below methods are required for the CallOpInterface

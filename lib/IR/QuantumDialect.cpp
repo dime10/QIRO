@@ -580,12 +580,13 @@ static void printMetaTypeSig(OpAsmPrinter &p, Type qbs1Type, Type qbs2Type, Type
 
 // custom directive to parse quantum meta gate type signature
 static ParseResult parseMetaTypeSig(OpAsmParser &p, Type &qbs1Type, Type &qbs2Type, Type &opType) {
-    if (succeeded(p.parseOptionalComma()))
+    if (succeeded(p.parseOptionalComma())) {
         if(p.parseType(qbs1Type))
             return EMIT_ERROR(p, "expected type after ',' token!");
         if (succeeded(p.parseOptionalComma()))
             if(p.parseType(qbs2Type))
                 return EMIT_ERROR(p, "expected type after ',' token!");
+    }
     if (succeeded(p.parseOptionalArrow()))
         if (p.parseType(opType))
             return EMIT_ERROR(p, "expected type after '->' token!");
@@ -694,7 +695,5 @@ OperandRange CallCircOp::getArgOperands() {
 // Auto-generated op & interface definitions
 //===------------------------------------------------------------------------------------------===//
 
-#define GET_INTERFACE_CLASSES
-#include "QuantumInterfaces.cpp.inc"
 #define GET_OP_CLASSES
 #include "QuantumOps.cpp.inc"

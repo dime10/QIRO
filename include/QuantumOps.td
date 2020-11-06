@@ -2,7 +2,6 @@
 #define QUANTUM_OPS
 
 include "QuantumDialect.td"
-include "QuantumInterfaces.td"
 include "mlir/IR/SymbolInterfaces.td"
 include "mlir/Interfaces/SideEffectInterfaces.td"
 include "mlir/Interfaces/CallInterfaces.td"
@@ -794,14 +793,15 @@ def CallCircOp : Quantum_Op<"call", [AttrSizedOperandSegments,
                     return this->emitOpError() << errMsg << *sigType << ". Got: " << argType << ".";
                 numIdxArgs++;
             } else if (auto sigRegType = sigType->dyn_cast<QuregType>()) {
-                if (auto argRegType = argType.dyn_cast<QuregType>())
+                if (auto argRegType = argType.dyn_cast<QuregType>()) {
                     if (argRegType.getNumQubits() && sigRegType.getNumQubits())
                         if (*argRegType.getNumQubits() < *sigRegType.getNumQubits())
                             return this->emitOpError() << "too few qubits in register! Expected: "
                                                        << *sigRegType.getNumQubits() << ". Got: "
                                                        << *argRegType.getNumQubits() << ".";
-                else
+                } else {
                     return this->emitOpError() << errMsg << *sigType << ". Got: " << argType << ".";
+                }
             } else {
                 if (*sigType != argType)
                     return this->emitOpError() << errMsg << *sigType << ". Got: " << argType << ".";
@@ -912,14 +912,15 @@ def ApplyCircOp : Quantum_Op<"apply", [AttrSizedOperandSegments]> {
                     return this->emitOpError() << errMsg << *sigType << ". Got: " << argType << ".";
                 numIdxArgs++;
             } else if (auto sigRegType = sigType->dyn_cast<QuregType>()) {
-                if (auto argRegType = argType.dyn_cast<QuregType>())
+                if (auto argRegType = argType.dyn_cast<QuregType>()) {
                     if (argRegType.getNumQubits() && sigRegType.getNumQubits())
                         if (*argRegType.getNumQubits() < *sigRegType.getNumQubits())
                             return this->emitOpError() << "too few qubits in register! Expected: "
                                                        << *sigRegType.getNumQubits() << ". Got: "
                                                        << *argRegType.getNumQubits() << ".";
-                else
+                } else {
                     return this->emitOpError() << errMsg << *sigType << ". Got: " << argType << ".";
+                }
             } else {
                 if (*sigType != argType)
                     return this->emitOpError() << errMsg << *sigType << ". Got: " << argType << ".";

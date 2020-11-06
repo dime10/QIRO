@@ -860,14 +860,15 @@ def CallCircOp : QuantumSSA_Op<"call", [DeclareOpInterfaceMethods<CallOpInterfac
         auto sigType = circType.getInputs().begin();
         for (auto argType : this->args().getTypes()) {
             if (auto sigRegType = sigType->dyn_cast<RstateType>()) {
-                if (auto argRegType = argType.dyn_cast<RstateType>())
+                if (auto argRegType = argType.dyn_cast<RstateType>()) {
                     if (argRegType.getNumQubits() && sigRegType.getNumQubits())
                         if (*argRegType.getNumQubits() < *sigRegType.getNumQubits())
                             return this->emitOpError() << "too few qubits in register! Expected: "
                                                        << *sigRegType.getNumQubits() << ". Got: "
                                                        << *argRegType.getNumQubits() << ".";
-                else
+                } else {
                     return this->emitOpError() << errMsg << *sigType << ". Got: " << argType << ".";
+                }
             } else {
                 if (*sigType != argType)
                     return this->emitOpError() << errMsg << *sigType << ". Got: " << argType << ".";

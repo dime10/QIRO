@@ -1412,6 +1412,8 @@ struct CircuitCancelBw : public OpRewritePattern<ApplyCircOp> {
                 nonQArgs.push_back(arg);
             }
         }
+        if (!parent)
+            return failure();
         CallCircOp call = cast<CallCircOp>(parent);
 
         // check both ops reference the same circuit, with an intermediate adjoint
@@ -1483,6 +1485,8 @@ struct CircuitCancelFw : public OpRewritePattern<CallCircOp> {
                 nonQArgs.push_back(arg);
             }
         }
+        if (!parent)
+            return failure();
         ApplyCircOp apply = cast<ApplyCircOp>(parent);
 
         // check both ops reference the same circuit, with an intermediate adjoint
