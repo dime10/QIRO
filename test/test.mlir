@@ -144,8 +144,9 @@ module {
 
     // test a parametrized circuit
     q.circ @entangle(%n: index, %r: !q.qureg<>) {
+        %c1 = constant 1 : index
         q.H %r[0] : !q.qureg<>
-        affine.for %i = 1 to %n {
+        scf.for %i = %c1 to %n step %c1 {
             q.CX %r[0], %r[%i] : !q.qureg<>, !q.qureg<>
         }
     }

@@ -4,7 +4,6 @@
 #include "mlir/IR/PatternMatch.h"
 #include "mlir/Pass/Pass.h"
 #include "mlir/Dialect/StandardOps/IR/Ops.h"
-#include "mlir/Dialect/Affine/IR/AffineOps.h"
 #include "mlir/Dialect/SCF/SCF.h"
 
 #include "QuantumDialect.h"
@@ -84,13 +83,13 @@ private:
             callback(op, innerStateMap, dummy, dummy);
         else if (isa<scf::IfOp>(op))      // map is unused here
             prepControlFlow(op, *opBuilder, innerStateMap, innerUniqueValues, iterArgs);
-        else if (isa<AffineForOp>(op)) {  // CF needs a temperary local copy of the outer map
+        else if (isa<scf::ForOp>(op)) {  // CF needs a temperary local copy of the outer map
             innerStateMap = outerStateMap;
             prepControlFlow(op, *opBuilder, innerStateMap, innerUniqueValues, iterArgs);
         }
 
         // walk nested operations
-        bool isSCF = isa<AffineForOp>(op) || isa<scf::IfOp>(op);
+        bool isSCF = isa<scf::ForOp>(op) || isa<scf::IfOp>(op);
         bool isNesting = isa<quantum::CircuitOp>(op) || isSCF;
         value_map &mapToUse = isNesting ? innerStateMap : outerStateMap;
         SmallVectorImpl<Value> &valsToUse = isSCF ? innerUniqueValues : outerUniqueValues;
@@ -431,7 +430,7 @@ private:
         gatherUniqueValues(op, valueSet);
         uniqueValues.append(valueSet.begin(), valueSet.end());
 
-        if (isa<AffineForOp>(op)) {
+        if (isa<scf::ForOp>(op)) {
             SmallVector<Type, 4> iterTypes;
             iterTypes.reserve(uniqueValues.size());
             iterArgs.reserve(uniqueValues.size());
@@ -493,8 +492,7 @@ public:
 
             // nothing to do for operations outside the Quantum dialect
             if (!isa<quantum::QuantumDialect>(op->getDialect()) &&
-                    !isa<scf::SCFDialect>(op->getDialect()) &&
-                    !isa<AffineDialect>(op->getDialect()))
+                    !isa<scf::SCFDialect>(op->getDialect()))
                 return;
 
             // set up common resources
@@ -589,20 +587,14 @@ public:
             } else if (isa<quantum::ApplyCircOp>(op)) {
                 newOp = buildCall<ApplyCircOp>(b, qbmap, op);
 
-            } else if (auto forOp = dyn_cast<AffineForOp>(op)) {
+            } else if (auto forOp = dyn_cast<scf::ForOp>(op)) {
                 // collect all Qdata ssa values accessed inside to generate return values
-                ValueRange lbOperands = forOp.getLowerBoundOperands();
-                AffineMap lbMap = forOp.getLowerBoundMap();
-                ValueRange ubOperands = forOp.getUpperBoundOperands();
-                AffineMap ubMap = forOp.getUpperBoundMap();
-                int64_t step = forOp.getStep();
-
-                OperationState opState(op->getLoc(), AffineForOp::getOperationName());
-                AffineForOp::build(b, opState, lbOperands, lbMap,
-                                   ubOperands, ubMap, step, iterArgs);
+                OperationState opState(op->getLoc(), scf::ForOp::getOperationName());
+                scf::ForOp::build(b, opState, forOp.lowerBound(), forOp.upperBound(), forOp.step(),
+                                  iterArgs);
                 newOp = b.createOperation(opState);
 
-                // handle the loop body region
+                // handle the loop body region, region args already handled in prep function
                 BlockAndValueMapping mapping;
                 newOp->getRegion(0).front().erase();
                 op->getRegion(0).cloneInto(&newOp->getRegion(0), mapping);
@@ -642,8 +634,6 @@ public:
             } else if (isa<quantum::TerminatorOp>(op)) {
                 newOp = buildTerm<ReturnStateOp>(b, qbmap, op,
                     op->getParentOfType<quantum::CircuitOp>().getArguments());
-            } else if (isa<AffineYieldOp>(op)) {
-                newOp = buildTerm<AffineYieldOp>(b, qbmap, op, uniqueValues);
             } else if (isa<scf::YieldOp>(op)) {
                 newOp = buildTerm<scf::YieldOp>(b, qbmap, op, uniqueValues);
             }

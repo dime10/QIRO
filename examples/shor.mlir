@@ -113,14 +113,15 @@ func @calc_shor_angle(%i: index, %j: index) -> f64 {
 
 // quantum fourier transform on register r
 q.circ @QFT(%r: !q.qureg<>, %n : index) attributes {no_inline} {
+    %c0 = constant 0 : index
     %c1 = constant 1 : index
     %c2 = constant 2 : index
 
-    affine.for %i = 0 to %n {
+    scf.for %i = %c0 to %n step %c1 {
         %0 = addi %i, %c1 : index
         %k = subi %n, %0 : index
         q.H %r[%k] : !q.qureg<>
-        affine.for %j = 0 to affine_map<(n,i)->(n-i-1)>(%n,%i) {
+        scf.for %j = %c0 to %k step %c1 {
             %phi = call @calc_qft_angle(%j) : (index) -> f64
             %R = q.R(%phi: f64) -> !q.u1
             %1 = addi %j, %c1 : index
@@ -130,7 +131,7 @@ q.circ @QFT(%r: !q.qureg<>, %n : index) attributes {no_inline} {
     }
 
     %nd2 = divi_unsigned %n, %c2 : index
-    affine.for %i = 0 to %nd2 {
+    scf.for %i = %c0 to %nd2 step %c1 {
         %0 = addi %i, %c1 : index
         %j = subi %n, %0 : index
         q.SWAP %r[%i], %r[%j] : !q.qureg<>, !q.qureg<>
@@ -139,12 +140,15 @@ q.circ @QFT(%r: !q.qureg<>, %n : index) attributes {no_inline} {
 
 // add a positive or negative constant to register of size n
 q.circ @addConstant(%C: i32, %r: !q.qureg<>, %n: index) {
+    %c0 = constant 0 : index
+    %s1 = constant 1 : index
     %c1 = constant 1 : i32
     // compute
     q.call @QFT(%r, %n) : !q.qureg<>, index
 
-    affine.for %i = 0 to %n {
-        affine.for %j = 0 to affine_map<(i)->(i+1)>(%i) {
+    scf.for %i = %c0 to %n step %s1 {
+        %ip1 = addi %i, %s1 : index
+        scf.for %j = %c0 to %ip1 step %s1 {
             %k = subi %i, %j : index
             %0 = index_cast %k : index to i32
             %1 = shift_right_signed %C, %0 : i32
@@ -204,12 +208,13 @@ q.circ @subCmodN(%C: i32, %N: i32, %r: !q.qureg<>, %n: index) {
 
 // multiply a positive constant by a register modulo N, need gcd(C, N) = 1
 q.circ @mulCmodN(%C: i32, %N: i32, %r: !q.qureg<>, %n: index) {
+    %c0 = constant 0 : index
     %c1 = constant 1 : index
     %np1 = muli %n, %c1 : index
     %anc = q.allocreg(%np1) -> !q.qureg<>
     %Cinv = call @mod_inv(%C, %N) : (i32, i32) -> i32
 
-    affine.for %i = 0 to %n {
+    scf.for %i = %c0 to %n step %c1 {
         %addOp = q.getval @addCmodN -> !q.circ
         %ctrlAdd = q.ctrl %addOp, %r[%i] : !q.circ, !q.qureg<> -> !q.cop<1, !q.circ>
 
@@ -219,11 +224,11 @@ q.circ @mulCmodN(%C: i32, %N: i32, %r: !q.qureg<>, %n: index) {
         q.apply %ctrlAdd(%2, %N, %anc, %np1) : !q.cop<1, !q.circ>(i32, i32, !q.qureg<>, index)
     }
 
-    affine.for %i = 0 to %n {
+    scf.for %i = %c0 to %n step %c1 {
         q.SWAP %anc[%i], %r[%i] : !q.qureg<> , !q.qureg<>
     }
 
-    affine.for %i = 0 to %n {
+    scf.for %i = %c0 to %n step %c1 {
         %subOp = q.getval @subCmodN -> !q.circ
         %ctrlSub = q.ctrl %subOp, %r[%i] : !q.circ, !q.qureg<> -> !q.cop<1, !q.circ>
 
@@ -237,18 +242,21 @@ q.circ @mulCmodN(%C: i32, %N: i32, %r: !q.qureg<>, %n: index) {
 }
 
 q.circ @shor(%N: i32, %a: i32) {
+    %c0 = constant 0 : index
+    %c1 = constant 1 : index
+    %c2 = constant 2 : index
+
     %0 = uitofp %N : i32 to f64
     %1 = log2 %0 : f64
     %2 = ceilf %0 : f64
     %3 = fptoui %2 : f64 to i32
     %n = index_cast %3 : i32 to index
-    %c2 = constant 2 : index
     %n2 = muli %n, %c2 : index
 
-    %c0 = constant 0 : i1
+    %m0 = constant 0 : i1
     %meas = alloc(%n2) : memref<?xi1>
-    affine.for %i = 0 to %n2 {
-        store %c0, %meas[%i] : memref<?xi1>
+    scf.for %i = %c0 to %n2 step %c1 {
+        store %m0, %meas[%i] : memref<?xi1>
     }
 
     %r = q.allocreg(%n) -> !q.qureg<>
@@ -256,7 +264,7 @@ q.circ @shor(%N: i32, %a: i32) {
 
     q.X %r[0] : !q.qureg<>
 
-    affine.for %i = 0 to %n2 {
+    scf.for %i = %c0 to %n2 step %c1 {
         %cur_a = call @calc_cur_a(%N, %n, %a, %i) : (i32, index, i32, index) -> i32
 
         q.H %cqb : !q.qubit
@@ -264,7 +272,7 @@ q.circ @shor(%N: i32, %a: i32) {
         %ctrlMul = q.ctrl %mulOp, %cqb : !q.circ, !q.qubit -> !q.cop<1, !q.circ>
         q.apply %ctrlMul(%cur_a, %N, %r, %n) : !q.cop<1, !q.circ>(i32, i32, !q.qureg<>, index)
 
-        affine.for %j = 0 to affine_map<(i)->(i)>(%i) {
+        scf.for %j = %c0 to %i step %c1 {
             %cond = load %meas[%j] : memref<?xi1>
             scf.if %cond {
                 %phi = call @calc_shor_angle(%i, %j) : (index, index) -> f64

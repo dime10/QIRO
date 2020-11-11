@@ -49,10 +49,11 @@ q.call @circ0(%0, %1) : !q.qubit, !q.qubit
 
 // test a parametric circuit
 q.circ @newfun(%q : !q.qubit, %q2 : !q.qubit, %r : !q.qureg<>, %n : index, %extra : !q.qubit) {
+    %c0 = constant 0 : index
     %c1 = constant 1 : index
     %cond = cmpi "eq", %n, %c1 : index
 
-    affine.for %i = 0 to %n {
+    scf.for %i = %c0 to %n step %c1 {
         q.H %q : !q.qubit
         q.CX %q, %r[%i] : !q.qubit, !q.qureg<>
 
@@ -96,7 +97,9 @@ q.adj %cop0, %0 : !q.cop<1, !q.u1>, !q.qubit
 q.apply %aop2(%0, %1, %2, %n, %99) : !q.circ(!q.qubit, !q.qubit, !q.qureg<4>, index, !q.qubit)
 
 // test global affine loop
-affine.for %i = 0 to 4 {
+%c0 = constant 0 : index
+%c1 = constant 1 : index
+scf.for %i = %c0 to %s step %c1 {
     q.H %0 : !q.qubit
     q.CX %0, %2[%i] : !q.qubit, !q.qureg<4>
 }

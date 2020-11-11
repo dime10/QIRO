@@ -32,8 +32,6 @@ namespace {
 enum Action {
   None,
   DumpMLIRQuant,
-  DumpMLIRAffine,
-  DumpMLIRSCF,
   DumpMLIRSTD,
   DumpMLIRLLVM,
   DumpLLVMIR,
@@ -88,8 +86,6 @@ int loadAndProcessMLIR(mlir::MLIRContext &context, mlir::OwningModuleRef &module
 
     if (emitAction >= Action::DumpMLIRQuant)
         pm.addPass(mlir::quantum::createMemToValPass());
-    if (emitAction >= Action::DumpMLIRSCF)
-        pm.addPass(mlir::createLowerAffinePass());
     if (emitAction >= Action::DumpMLIRSTD)
         pm.addPass(mlir::createLowerToCFGPass());
     if (emitAction >= Action::DumpMLIRLLVM) {
@@ -173,7 +169,6 @@ int main(int argc, char **argv) {
     // `registerAllDialects(registry);`
     mlir::MLIRContext context(/*loadAllDialects=*/false);
     context.getOrLoadDialect<mlir::StandardOpsDialect>();
-    context.getOrLoadDialect<mlir::AffineDialect>();
     context.getOrLoadDialect<mlir::scf::SCFDialect>();
     context.getOrLoadDialect<mlir::vector::VectorDialect>();
     context.getOrLoadDialect<mlir::quantum::QuantumDialect>();

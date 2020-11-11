@@ -37,7 +37,6 @@ int main(int argc, char **argv) {
     // If blanket registration of all dialects is prefered, use this statement instead:
     // `registerAllDialects(registry);`
     registry.insert<mlir::StandardOpsDialect>();
-    registry.insert<mlir::AffineDialect>();
     registry.insert<mlir::scf::SCFDialect>();
     registry.insert<mlir::quantum::QuantumDialect>();
     registry.insert<mlir::quantumssa::QuantumSSADialect>();
