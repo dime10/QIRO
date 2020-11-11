@@ -231,14 +231,14 @@ def ExtractOp : QuantumSSA_Op<"extract", [NoSideEffect]> {
             return this->emitOpError() << "needs at least 1 index, either as attribute or operand!";
 
         // check num indices/qubits match
-        unsigned numIdx = this->const_idx() ? (*this->const_idx()).size() : this->dyn_idx().size();
+        size_t numIdx = this->const_idx() ? (*this->const_idx()).size() : this->dyn_idx().size();
         if (numIdx != this->qbs().size())
             return this->emitOpError() << "with differing number of qubits vs indices, qubits: "
                                        << this->qbs().size() << ", indices: " << numIdx << "!";
 
         // return type checking
         if (auto numQubits = this->reg().getType().cast<RstateType>().getNumQubits()) {
-            int regsize = *numQubits;
+            int64_t regsize = *numQubits;
 
             // bounds checking (if possible)
             if(this->const_idx()) {
@@ -251,7 +251,7 @@ def ExtractOp : QuantumSSA_Op<"extract", [NoSideEffect]> {
             }
 
             if (auto size = this->rem().getType().cast<RstateType>().getNumQubits())
-                if (*size != regsize - numIdx)
+                if (*size != regsize - (int64_t) numIdx)
                     return this->emitOpError() << "output reg size != (input reg size - # qubits)!";
         }
 
@@ -298,16 +298,16 @@ def CombineStatOp : QuantumSSA_Op<"scombine", [NoSideEffect]> {
 
     let verifier = [{
         // check num indices/qubits match
-        unsigned numIdx = this->const_idx().size();
+        size_t numIdx = this->const_idx().size();
         if (numIdx != this->qbs().size())
             return this->emitOpError() << "with differing number of qubits vs indices, qubits: "
                                        << this->qbs().size() << ", indices: " << numIdx << "!";
 
         // return type checking
         if (auto numQubits = this->reg().getType().cast<RstateType>().getNumQubits()) {
-            int regsize = *numQubits;
+            size_t regsize = *numQubits;
             if (auto size = this->newreg().getType().cast<RstateType>().getNumQubits())
-                if (*size != regsize + numIdx)
+                if ((size_t) *size != regsize + numIdx)
                     return this->emitOpError() << "output reg size != (input reg size + # qubits)!";
 
             // bounds checking
@@ -316,7 +316,7 @@ def CombineStatOp : QuantumSSA_Op<"scombine", [NoSideEffect]> {
                 idxArray.push_back(idxAttr.dyn_cast<IntegerAttr>().getInt());
             std::sort(idxArray.begin(), idxArray.end());
             for (int64_t idx : idxArray) {
-                if (idx > regsize)
+                if (idx < 0 || (size_t) idx > regsize)
                         return this->emitOpError() << "detected index value out of bounds, idx: "
                                                    << idx << ", reg size: " << regsize << "!";
                 regsize++;
@@ -615,10 +615,10 @@ def CNotOp : QuantumSSA_Gate<"CX", [Unitary, Hermitian, AttrSizedOperandSegments
     let additionalVerifier = [{
         auto res = this->res().getType();
 
-        if (this->ctrl() && !this->qbs() || !this->ctrl() && this->qbs())
+        if ((this->ctrl() && !this->qbs()) || (!this->ctrl() && this->qbs()))
             return this->emitOpError() << "accepts either both control and target or neither!";
 
-        if (!res.isa<U2Type>() && !this->new_ctrl() || res.isa<U2Type>() && this->new_ctrl())
+        if ((!res.isa<U2Type>() && !this->new_ctrl()) || (res.isa<U2Type>() && this->new_ctrl()))
             return this->emitOpError() << "must return either both qb/reg states or neither!";
 
         if (!res.isa<U2Type>() && this->qbs().getType() != res)
@@ -670,10 +670,10 @@ def SwapOp : QuantumSSA_Gate<"SWAP", [Unitary, Hermitian, Commutative, AttrSized
     let additionalVerifier = [{
         auto res = this->res().getType();
 
-        if (this->qbs2() && !this->qbs() || !this->qbs2() && this->qbs())
+        if ((this->qbs2() && !this->qbs()) || (!this->qbs2() && this->qbs()))
             return this->emitOpError() << "accepts either both qubit operands or neither!";
 
-        if (!res.isa<U2Type>() && !this->new_qbs2() || res.isa<U2Type>() && this->new_qbs2())
+        if ((!res.isa<U2Type>() && !this->new_qbs2()) || (res.isa<U2Type>() && this->new_qbs2()))
             return this->emitOpError() << "must return either both qubit states or neither!";
     }];
 
@@ -1076,12 +1076,12 @@ def ControlOp : QuantumSSA_Gate<"ctrl", [Meta, AttrSizedOperandSegments]> {
         }
 
         // make sure user is not trying to apply a circuit op by specifying a target
-        if (this->qbs() && (heldOp.isa<CircType>() || heldOp.isa<COpType>() &&
-                            heldOp.cast<COpType>().getBaseType().isa<CircType>()))
+        if (this->qbs() && (heldOp.isa<CircType>() || (heldOp.isa<COpType>() &&
+                            heldOp.cast<COpType>().getBaseType().isa<CircType>())))
             return this->emitOpError() << "does not accept target qubits when controlling circuit!";
 
         // obtain total number of control qubits from input
-        unsigned totalctrls = 0;
+        int totalctrls = 0;
 
         auto ctrls = this->ctrls().getType();
         if (ctrls.isa<QstateType>()) {
@@ -1192,8 +1192,8 @@ def AdjointOp : QuantumSSA_Gate<"adj", [Meta, AttrSizedOperandSegments]> {
         }
 
         // make sure user is not trying to apply a circuit op by specifying a target
-        if (this->qbs() && (heldOp.isa<CircType>() || heldOp.isa<COpType>() &&
-                            heldOp.cast<COpType>().getBaseType().isa<CircType>()))
+        if (this->qbs() && (heldOp.isa<CircType>() || (heldOp.isa<COpType>() &&
+                            heldOp.cast<COpType>().getBaseType().isa<CircType>())))
             return this->emitOpError() << "does not accept target qubits when inverting circuit!";
 
         // check ouput op type matches input op type

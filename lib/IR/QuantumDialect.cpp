@@ -526,7 +526,7 @@ static void printArbitraryArgs(OpAsmPrinter &p,
                                OperandRange args, OperandRange ranges, TypeRange,
                                ArrayAttr staticRanges, ArrayAttr sizeParams) {
     const char *sep = "";
-    for (int sizeIdx = 0, argIdx = 0, rangeIdx = 0; sizeIdx < sizeParams.size(); sizeIdx++) {
+    for (size_t sizeIdx = 0, argIdx = 0, rangeIdx = 0; sizeIdx < sizeParams.size(); sizeIdx++) {
         p << sep; sep = ", ";
 
         if (sizeParams[sizeIdx].cast<IntegerAttr>().getInt() != -1) {

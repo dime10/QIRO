@@ -50,11 +50,11 @@ struct MemToValPass : public OperationPass<ModuleOp> {
     MemToValPass() : OperationPass<ModuleOp>(TypeID::get<MemToValPass>()) {}
     MemToValPass(const MemToValPass &) : OperationPass<ModuleOp>(TypeID::get<MemToValPass>()) {}
 
-    StringRef getName() const {
+    StringRef getName() const override {
         return "MemToValPass";
     }
 
-    std::unique_ptr<Pass> clonePass() const {
+    std::unique_ptr<Pass> clonePass() const override {
         return std::make_unique<MemToValPass>(*this);
     }
 
@@ -211,7 +211,7 @@ private:
                                        SmallVector<std::pair<int, int>, 2>>;
         SmallVector<access_info, 2> regsToExtr;
         std::unordered_map<Value, int> seen;
-        for (int i = 0, j = 0; i < operands.size(); i++) {
+        for (size_t i = 0, j = 0; i < operands.size(); i++) {
             if (isQSSAData(operands[i].getType())) {
                 if (staticRanges[j].size() == 1) {
                     if (seen.count(operands[i])) {
@@ -742,7 +742,7 @@ public:
         // extr1 will be replaced with the merged newExtr1, return values similarly replaced
         llvm::SmallVector<Value, 5> resultsOp1; resultsOp1.reserve(idxArr1.size() + 1);
         llvm::SmallVector<Value, 5> resultsOp2; resultsOp2.reserve(idxArr2.size() + 1);
-        for (int i = 0; i < idxArr1.size(); i++)
+        for (size_t i = 0; i < idxArr1.size(); i++)
             resultsOp1.push_back(newOp1->getResult(i));
         resultsOp1.push_back(newExtr1.rem());
         for (int i = idxArr1.size(); i < totalNumIdx; i++)
@@ -753,8 +753,7 @@ public:
         rewriter.replaceOp(op2, resultsOp2);
         rewriter.replaceOp(op1, resultsOp1);
 
-        if (failed(newExtr1.verify()))
-            throw;
+        newExtr1.verify();
     }
 };
 
@@ -811,8 +810,7 @@ public:
         // this instruction erases the given op and replaces all its uses with the provided values
         rewriter.replaceOp(op1, comb1.reg());
 
-        if (failed(cast<CombineStatOp>(op2).verify()))
-            throw;
+        cast<CombineStatOp>(op2).verify();
     }
 };
 
@@ -857,11 +855,11 @@ public:
         ArrayAttr idxArr1 = comb1.const_idxAttr();
         ArrayAttr idxArr2 = extr2.const_idxAttr();
         llvm::SmallVector<int64_t, 4> newIdxArr1; newIdxArr1.reserve(idxArr1.size());
-        llvm::SmallVector<std::tuple<int, int, int64_t>, 4> commonIndices;
-        for (int i = 0; i < idxArr1.size(); i++) {
+        llvm::SmallVector<std::tuple<size_t, size_t, int64_t>, 4> commonIndices;
+        for (size_t i = 0; i < idxArr1.size(); i++) {
             int64_t idx1val = idxArr1[i].dyn_cast<IntegerAttr>().getInt();
             bool match = false;
-            for (int j = 0; j < idxArr2.size(); j++) {
+            for (size_t j = 0; j < idxArr2.size(); j++) {
                 int64_t idx2val = idxArr2[j].dyn_cast<IntegerAttr>().getInt();
                 if (idx1val == idx2val) {
                     commonIndices.push_back({i, j, idx1val});
@@ -929,7 +927,7 @@ public:
             ExtractOp newExtr2 = cast<ExtractOp>(newOp2);
             // build updated value list
             llvm::SmallVector<Value, 4> updatedValues; updatedValues.reserve(op2->getNumResults());
-            for (int i = 0, j = 0, k = 0; i < extr2.qbs().size(); i ++) {
+            for (size_t i = 0, j = 0, k = 0; i < extr2.qbs().size(); i ++) {
                 if (j < commonIndices.size() && i == std::get<1>(commonIndices[j]))
                     updatedValues.push_back(comb1.qbs()[std::get<0>(commonIndices[j++])]);
                 else
@@ -1112,9 +1110,9 @@ public:
         // identify common qbs
         ResultRange extrQbs = extr1.qbs();
         OperandRange combQbs = comb2.qbs();
-        llvm::SmallVector<std::pair<int, int>, 4> commonQbs;
-        for (int i = 0; i < combQbs.size(); i++) {
-            for (int j = 0; j < extrQbs.size(); j++) {
+        llvm::SmallVector<std::pair<size_t, size_t>, 4> commonQbs;
+        for (size_t i = 0; i < combQbs.size(); i++) {
+            for (size_t j = 0; j < extrQbs.size(); j++) {
                 if (combQbs[i] == extrQbs[j]) {
                     commonQbs.push_back({i, j});
                     break;
@@ -1137,7 +1135,7 @@ public:
             // remove indices from attribute
             ArrayAttr idxArr2 = comb2.const_idxAttr();
             llvm::SmallVector<Attribute, 3> newIdxArr2; newIdxArr2.reserve(combQbsLeft);
-            for (int i = 0, j = 0; i < idxArr2.size(); i++) {
+            for (size_t i = 0, j = 0; i < idxArr2.size(); i++) {
                 if (j < commonQbs.size() && i != commonQbs[j].first) {
                     newIdxArr2.push_back(idxArr2[i]);
                     j++;
@@ -1180,7 +1178,7 @@ public:
             // remove indices from attribute
             ArrayAttr idxArr1 = extr1.const_idxAttr();
             llvm::SmallVector<Attribute, 3> newIdxArr1; newIdxArr1.reserve(extrQbsLeft);
-            for (int i = 0, j = 0; i < idxArr1.size(); i++) {
+            for (size_t i = 0, j = 0; i < idxArr1.size(); i++) {
                 if (j < commonQbs.size() && i != commonQbs[j].second) {
                     newIdxArr1.push_back(idxArr1[i]);
                     j++;
@@ -1253,7 +1251,7 @@ struct AdjointCancelBw : public OpRewritePattern<AdjointOp> {
         Operation *qbParent = nullptr;
         if (adj.qbs()) {
             qbParent = adj.qbs().getDefiningOp();
-            if (!qbParent || adj.qbs2() && adj.qbs2().getDefiningOp() != qbParent)
+            if (!qbParent || (adj.qbs2() && adj.qbs2().getDefiningOp() != qbParent))
                 return failure();
             if (adj.getParentRegion() != qbParent->getParentRegion())
                 return failure();
@@ -1606,11 +1604,11 @@ struct QuantumGateOptimizationPass : public OperationPass<ModuleOp> {
     QuantumGateOptimizationPass(const QuantumGateOptimizationPass &)
         : OperationPass<ModuleOp>(TypeID::get<QuantumGateOptimizationPass>()) {}
 
-    StringRef getName() const {
+    StringRef getName() const override {
         return "QuantumGateOptimizationPass";
     }
 
-    std::unique_ptr<Pass> clonePass() const {
+    std::unique_ptr<Pass> clonePass() const override {
         return std::make_unique<QuantumGateOptimizationPass>(*this);
     }
 

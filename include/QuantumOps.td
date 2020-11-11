@@ -527,7 +527,7 @@ def CNotOp : Quantum_Gate<"CX", [Unitary, Hermitian, AttrSizedOperandSegments]>{
     );
 
     let additionalVerifier = [{
-        if (this->ctrl() && !this->qbs() || !this->ctrl() && this->qbs())
+        if ((this->ctrl() && !this->qbs()) || (!this->ctrl() && this->qbs()))
             return this->emitOpError() << "accepts either both control and target or neither!";
 
         if (this->ctrl() && this->ctrl().getType().isa<QuregType>()
@@ -583,7 +583,7 @@ def SwapOp : Quantum_Gate<"SWAP", [Unitary, Hermitian, AttrSizedOperandSegments,
     );
 
     let additionalVerifier = [{
-        if (this->qbs() && !this->qbs2() || !this->qbs() && this->qbs2())
+        if ((this->qbs() && !this->qbs2()) || (!this->qbs() && this->qbs2()))
             return this->emitOpError() << "accepts either both operands or neither!";
 
         std::string errMsg = "needs single qubit for both operands, thus if any value is a "
@@ -1030,8 +1030,8 @@ def ControlOp : Quantum_Gate<"ctrl", [Meta, AttrSizedOperandSegments]> {
         }
 
         // make sure user is not trying to apply a circuit op by specifying a target
-        if (this->qbs() && (heldOp.isa<CircType>() || heldOp.isa<COpType>() &&
-                            heldOp.cast<COpType>().getBaseType().isa<CircType>()))
+        if (this->qbs() && (heldOp.isa<CircType>() || (heldOp.isa<COpType>() &&
+                            heldOp.cast<COpType>().getBaseType().isa<CircType>())))
             return this->emitOpError() << "does not accept target qubits when controlling circuit!";
 
         // obtain total number of control qubits from input

@@ -34,7 +34,7 @@ public:
 
     static RstateType get(mlir::MLIRContext *ctx, llvm::Optional<int> size);
 
-    llvm::Optional<int> RstateType::getNumQubits();
+    llvm::Optional<int> getNumQubits();
 };
 
 // This class represents a native quantum gate on one qubit.
