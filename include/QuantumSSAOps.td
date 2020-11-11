@@ -383,6 +383,8 @@ def CombineDynOp : QuantumSSA_Op<"dcombine", [NoSideEffect, SameVariadicOperandS
     let assemblyFormat = [{
         $reg `[` $dyn_idx `]` `,` $qbs attr-dict `:` type($reg) `,` type($qbs) `->` type(results)
     }];
+
+    let hasCanonicalizer = 1;
 }
 
 def HOp : QuantumSSA_Gate<"H", [Unitary, Hermitian]> {
@@ -811,6 +813,8 @@ def CircuitValueOp : QuantumSSA_Op<"getval", [NoSideEffect]> {
     let assemblyFormat = [{
         $circref attr-dict `->` type($circval)
     }];
+
+    let hasCanonicalizer = 1;
 }
 
 def CallCircOp : QuantumSSA_Op<"call", [DeclareOpInterfaceMethods<CallOpInterface>]> {
@@ -1009,6 +1013,8 @@ def ApplyCircOp : QuantumSSA_Op<"apply"> {
     let assemblyFormat = [{
         $circval `(` $args `)` attr-dict `:` type($circval) `(` type($args) `->` type($results) `)`
     }];
+
+    let hasCanonicalizer = 1;
 }
 
 def ControlOp : QuantumSSA_Gate<"ctrl", [Meta, AttrSizedOperandSegments]> {

@@ -1194,6 +1194,50 @@ public:
     }
 };
 
+/*--- Patterns with dynamic indices ---*/
+
+class ExtractDynCombinePatt : public RewritePattern {
+public:
+    ExtractDynCombinePatt(PatternBenefit benefit, MLIRContext *context) :
+        RewritePattern(CombineDynOp::getOperationName(), benefit, context) {}
+
+    // Match (extract - combine) pattern within the same region
+    LogicalResult match(Operation *op2) const override {
+        CombineDynOp comb2 = cast<CombineDynOp>(op2);
+        Operation *op1 = comb2.reg().getDefiningOp();
+        if (!isa_and_nonnull<ExtractOp>(op1) || op1->getParentRegion() != op2->getParentRegion())
+            return failure();
+        ExtractOp extr1 = cast<ExtractOp>(op1);
+        if (extr1.const_idx())
+            return failure();
+
+        // only match if all qubits match
+        auto extr1QbIt = extr1.qbs().begin();
+        for (Value qb2 : comb2.qbs()) {
+            if (*extr1QbIt++ != qb2)
+                return failure();
+        }
+
+        // only match if all indices match
+        auto extr1IdxIt = extr1.dyn_idx().begin();
+        for (Value idx2 : comb2.dyn_idx()) {
+            if (*extr1IdxIt++ != idx2)
+                return failure();
+        }
+        return success();
+    }
+
+    void rewrite(Operation *op2, PatternRewriter &rewriter) const override {
+        CombineDynOp comb2 = cast<CombineDynOp>(op2);
+        Operation *op1 = comb2.reg().getDefiningOp();
+        ExtractOp extr1 = cast<ExtractOp>(op1);
+
+        // delete both of them, replacing output register with input register
+        rewriter.replaceOp(comb2, {extr1.reg()});
+        rewriter.eraseOp(extr1);
+    }
+};
+
 
 //===------------------------------------------------------------------------------------------===//
 // Quantum Peephole Optimization Patterns
@@ -1598,6 +1642,42 @@ struct FoldDanglingAdjoint : public OpRewritePattern<AdjointOp> {
     }
 };
 
+// change apply to call if it directly succeeds a getval op
+struct FoldApply : public OpRewritePattern<ApplyCircOp> {
+    FoldApply(MLIRContext *context) : OpRewritePattern<ApplyCircOp>(context, /*benefit*/1) {}
+
+    // Matching logic
+    LogicalResult matchAndRewrite(ApplyCircOp apply, PatternRewriter &rewriter) const override {
+        if (auto valOp = dyn_cast<CircuitValueOp>(apply.circval().getDefiningOp())) {
+            OperationState callState(apply.getLoc(), CallCircOp::getOperationName());
+            CallCircOp::build(rewriter, callState, apply.getResultTypes(), valOp.circrefAttr(),
+                              apply.getOperands().drop_front());
+            Operation *newOp = rewriter.createOperation(callState);
+            for (auto attr : apply.getAttrs())
+                newOp->setAttr(attr.first, attr.second);
+            rewriter.replaceOp(apply, newOp->getResults());
+            return success();
+        }
+
+        return failure();
+    }
+};
+
+// remove circuit value op if its result has no uses
+struct FoldCircVal : public OpRewritePattern<CircuitValueOp> {
+    FoldCircVal(MLIRContext *context) : OpRewritePattern<CircuitValueOp>(context, /*benefit*/1) {}
+
+    // Matching logic
+    LogicalResult matchAndRewrite(CircuitValueOp cval, PatternRewriter &rewriter) const override {
+        if (cval.circval().getUses().empty()) {
+            rewriter.eraseOp(cval);
+            return success();
+        }
+
+        return failure();
+    }
+};
+
 struct QuantumGateOptimizationPass : public OperationPass<ModuleOp> {
     QuantumGateOptimizationPass()
         : OperationPass<ModuleOp>(TypeID::get<QuantumGateOptimizationPass>()) {}
@@ -1652,6 +1732,11 @@ void CombineStatOp::getCanonicalizationPatterns(OwningRewritePatternList &patter
     patterns.insert<ExtractCombinePatt>(2, context);
 }
 
+void CombineDynOp::getCanonicalizationPatterns(OwningRewritePatternList &patterns,
+                                               MLIRContext *context) {
+    patterns.insert<ExtractDynCombinePatt>(2, context);
+}
+
 void ControlOp::getCanonicalizationPatterns(OwningRewritePatternList &patterns,
                                             MLIRContext *context) {
     patterns.insert<FoldDanglingControl>(context);
@@ -1661,4 +1746,14 @@ void ControlOp::getCanonicalizationPatterns(OwningRewritePatternList &patterns,
 void AdjointOp::getCanonicalizationPatterns(OwningRewritePatternList &patterns,
                                             MLIRContext *context) {
     patterns.insert<FoldDanglingAdjoint>(context);
+}
+
+void ApplyCircOp::getCanonicalizationPatterns(OwningRewritePatternList &patterns,
+                                              MLIRContext *context) {
+    patterns.insert<FoldApply>(context);
+}
+
+void CircuitValueOp::getCanonicalizationPatterns(OwningRewritePatternList &patterns,
+                                                 MLIRContext *context) {
+    patterns.insert<FoldCircVal>(context);
 }
