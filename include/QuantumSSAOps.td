@@ -734,7 +734,8 @@ def CircuitOp : QuantumSSA_Op<"circ", [Symbol, FunctionLike, IsolatedFromAbove, 
     }];
 
     let arguments = (ins
-        UnitAttr : $no_inline
+        UnitAttr : $no_inline,
+        UnitAttr : $no_inline_target
     );
 
     let regions = (region

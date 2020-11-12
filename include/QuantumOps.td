@@ -295,7 +295,9 @@ def HOp : Quantum_Gate<"H", [Unitary, Hermitian, AttrSizedOperandSegments]> {
     let arguments = (ins
         Optional<QData_Type> : $qbs,
         Variadic<Index> : $range,
-        I64ArrayAttr : $static_range
+        I64ArrayAttr : $static_range,
+        UnitAttr : $compute,
+        UnitAttr : $uncompute
     );
 
     let results = (outs
@@ -342,7 +344,9 @@ def XOp : Quantum_Gate<"X", [Unitary, Hermitian, AttrSizedOperandSegments]> {
     let arguments = (ins
         Optional<QData_Type> : $qbs,
         Variadic<Index> : $range,
-        I64ArrayAttr : $static_range
+        I64ArrayAttr : $static_range,
+        UnitAttr : $compute,
+        UnitAttr : $uncompute
     );
 
     let results = (outs
@@ -392,7 +396,9 @@ def RzOp : Quantum_Gate<"RZ", [Unitary, AttrSizedOperandSegments]> {
         OptionalAttr<F64Attr> : $static_phi,
         Optional<QData_Type> : $qbs,
         Variadic<Index> : $range,
-        I64ArrayAttr : $static_range
+        I64ArrayAttr : $static_range,
+        UnitAttr : $compute,
+        UnitAttr : $uncompute
     );
 
     let results = (outs
@@ -453,7 +459,9 @@ def ROp : Quantum_Gate<"R", [Unitary, AttrSizedOperandSegments]> {
         OptionalAttr<F64Attr> : $static_phi,
         Optional<QData_Type> : $qbs,
         Variadic<Index> : $range,
-        I64ArrayAttr : $static_range
+        I64ArrayAttr : $static_range,
+        UnitAttr : $compute,
+        UnitAttr : $uncompute
     );
 
     let results = (outs
@@ -519,7 +527,9 @@ def CNotOp : Quantum_Gate<"CX", [Unitary, Hermitian, AttrSizedOperandSegments]>{
         I64ArrayAttr : $static_crange,
         Optional<QData_Type> : $qbs,
         Variadic<Index> : $qrange,
-        I64ArrayAttr : $static_qrange
+        I64ArrayAttr : $static_qrange,
+        UnitAttr : $compute,
+        UnitAttr : $uncompute
     );
 
     let results = (outs
@@ -575,7 +585,9 @@ def SwapOp : Quantum_Gate<"SWAP", [Unitary, Hermitian, AttrSizedOperandSegments,
         I64ArrayAttr : $static_range,
         Optional<QData_Type> : $qbs2,
         Variadic<Index> : $range2,
-        I64ArrayAttr : $static_range2
+        I64ArrayAttr : $static_range2,
+        UnitAttr : $compute,
+        UnitAttr : $uncompute
     );
 
     let results = (outs
@@ -657,7 +669,8 @@ def CircuitOp : Quantum_Op<"circ", [Symbol, FunctionLike, IsolatedFromAbove,
     }];
 
     let arguments = (ins
-        UnitAttr : $no_inline
+        UnitAttr : $no_inline,
+        UnitAttr : $no_inline_target
     );
 
     let regions = (region
@@ -770,7 +783,9 @@ def CallCircOp : Quantum_Op<"call", [AttrSizedOperandSegments,
         Variadic<AnyType> : $args,
         Variadic<Index> : $ranges,
         2dI64ArrayAttr : $static_ranges,
-        I64ArrayAttr : $size_params
+        I64ArrayAttr : $size_params,
+        UnitAttr : $compute,
+        UnitAttr : $uncompute
     );
 
     let verifier = [{
@@ -886,7 +901,9 @@ def ApplyCircOp : Quantum_Op<"apply", [AttrSizedOperandSegments]> {
         Variadic<AnyType> : $args,
         Variadic<Index> : $ranges,
         2dI64ArrayAttr : $static_ranges,
-        I64ArrayAttr : $size_params
+        I64ArrayAttr : $size_params,
+        UnitAttr : $compute,
+        UnitAttr : $uncompute
     );
 
     let verifier = [{
@@ -1008,7 +1025,9 @@ def ControlOp : Quantum_Gate<"ctrl", [Meta, AttrSizedOperandSegments]> {
         I64ArrayAttr : $static_range,
         Optional<QData_Type> : $qbs2,
         Variadic<Index> : $range2,
-        I64ArrayAttr : $static_range2
+        I64ArrayAttr : $static_range2,
+        UnitAttr : $compute,
+        UnitAttr : $uncompute
     );
 
     let results = (outs
@@ -1130,7 +1149,9 @@ def AdjointOp : Quantum_Gate<"adj", [Meta, AttrSizedOperandSegments]> {
         I64ArrayAttr : $static_range,
         Optional<QData_Type> : $qbs2,
         Variadic<Index> : $range2,
-        I64ArrayAttr : $static_range2
+        I64ArrayAttr : $static_range2,
+        UnitAttr : $compute,
+        UnitAttr : $uncompute
     );
 
     let results = (outs
@@ -1191,7 +1212,9 @@ def MeasurementOp : Quantum_Op<"meas"> {
     let arguments = (ins
         QData_Type : $qbs,
         Variadic<Index> : $range,
-        I64ArrayAttr : $static_range
+        I64ArrayAttr : $static_range,
+        UnitAttr : $compute,
+        UnitAttr : $uncompute
     );
 
     let results = (outs

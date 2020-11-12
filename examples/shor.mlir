@@ -144,7 +144,7 @@ q.circ @addConstant(%C: i32, %r: !q.qureg<>, %n: index) {
     %s1 = constant 1 : index
     %c1 = constant 1 : i32
     // compute
-    q.call @QFT(%r, %n) : !q.qureg<>, index
+    q.call @QFT(%r, %n) {compute} : !q.qureg<>, index
 
     scf.for %i = %c0 to %n step %s1 {
         %ip1 = addi %i, %s1 : index
@@ -164,7 +164,7 @@ q.circ @addConstant(%C: i32, %r: !q.qureg<>, %n: index) {
     // uncompute
     %qft = q.getval @QFT -> !q.circ
     %qft_inv = q.adj %qft : !q.circ -> !q.circ
-    q.apply %qft_inv(%r, %n) : !q.circ(!q.qureg<>, index)
+    q.apply %qft_inv(%r, %n) {uncompute} : !q.circ(!q.qureg<>, index)
 }
 
 // substract a constant from register of size n
@@ -182,19 +182,19 @@ q.circ @addCmodN(%C: i32, %N: i32, %r: !q.qureg<>, %n: index) {
     q.call @addConstant(%C, %r, %n) : i32, !q.qureg<>, index
 
     // compute
-    q.call @subConstant(%N, %r, %n) : i32, !q.qureg<>, index
+    q.call @subConstant(%N, %r, %n) {compute} : i32, !q.qureg<>, index
     %anc = q.alloc -> !q.qubit
-    q.CX %r[%nm1], %anc : !q.qureg<>, !q.qubit
+    q.CX %r[%nm1], %anc {compute} : !q.qureg<>, !q.qubit
     %addOp = q.getval @addConstant -> !q.circ
     %ctrlAdd = q.ctrl %addOp, %anc : !q.circ, !q.qubit -> !q.cop<1, !q.circ>
-    q.apply %ctrlAdd(%N, %r, %n) : !q.cop<1, !q.circ>(i32, !q.qureg<>, index)
+    q.apply %ctrlAdd(%N, %r, %n) {compute} : !q.cop<1, !q.circ>(i32, !q.qureg<>, index)
 
     q.call @subConstant(%C, %r, %n) : i32, !q.qureg<>, index
 
     // uncompute
-    q.X %r[%nm1] : !q.qureg<>
-    q.CX %r[%nm1], %anc : !q.qureg<>, !q.qubit
-    q.X %r[%nm1] : !q.qureg<>
+    q.X %r[%nm1] {uncompute} : !q.qureg<>
+    q.CX %r[%nm1], %anc {uncompute} : !q.qureg<>, !q.qubit
+    q.X %r[%nm1] {uncompute} : !q.qureg<>
     q.free %anc : !q.qubit
 
     q.call @addConstant(%C, %r, %n) : i32, !q.qureg<>, index
@@ -292,4 +292,11 @@ q.circ @shor(%N: i32, %a: i32) {
     q.freereg %r : !q.qureg<>
 
     // return result
+}
+
+q.circ @main() attributes {no_inline_target} {
+    %N = constant 15 : i32
+    %a = constant 2 : i32
+
+    q.call @shor(%N, %a) : i32, i32
 }

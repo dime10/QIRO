@@ -257,6 +257,10 @@ private:
         Operation *newOp = b.createOperation(opState);
         newStates.append(newOp->result_begin(), op->getNumResults() ? --newOp->result_end()
                                                                     : newOp->result_end());
+        if (op->getAttr("compute"))
+            newOp->setAttr("compute", b.getUnitAttr());
+        if (op->getAttr("uncompute"))
+            newOp->setAttr("uncompute", b.getUnitAttr());
 
         for (access_info &t : regsToExtr) {
             SmallVector<Value, 2> qbs;
@@ -339,6 +343,10 @@ private:
         OperationState opState(op->getLoc(), M::getOperationName());
         M::build(b, opState, retTypes, operands, {});
         Operation *newOp = b.createOperation(opState);
+        if (op->getAttr("compute"))
+            newOp->setAttr("compute", b.getUnitAttr());
+        if (op->getAttr("uncompute"))
+            newOp->setAttr("uncompute", b.getUnitAttr());
 
         if (staticRange.size() == 1) {
             Value reg = extrOp->getResult(1);
@@ -386,6 +394,10 @@ private:
         OperationState opState(op->getLoc(), C::getOperationName());
         C::build(b, opState, resultTypes, operands, attrs);
         Operation *newOp = b.createOperation(opState);
+        if (op->getAttr("compute"))
+            newOp->setAttr("compute", b.getUnitAttr());
+        if (op->getAttr("uncompute"))
+            newOp->setAttr("uncompute", b.getUnitAttr());
 
         auto resIt = newOp->result_begin();
         for (auto arg : qargs)
@@ -564,6 +576,8 @@ public:
                 CircuitOp::build(b, opState, circ.getName(), newType);
                 if (circ.no_inline())
                     opState.addAttribute("no_inline", b.getUnitAttr());
+                if (circ.no_inline_target())
+                    opState.addAttribute("no_inline_target", b.getUnitAttr());
                 newOp = circInProg = b.createOperation(opState);
                 CircuitOp newCirc = cast<CircuitOp>(newOp);
                 newCirc.addEntryBlock();

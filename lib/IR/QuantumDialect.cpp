@@ -35,6 +35,9 @@ struct QuantumInlinerInterface : public DialectInlinerInterface {
     bool isLegalToInline(Region *dest, Region *src, BlockAndValueMapping &mapping) const final {
         if (src->getParentOp()->getAttr("no_inline"))
             return false;
+        if (!dest->getParentOfType<CircuitOp>() ||
+                dest->getParentOfType<CircuitOp>().getAttr("no_inline_target"))
+            return false;
         return true;
     }
 
