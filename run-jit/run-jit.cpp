@@ -32,6 +32,7 @@ namespace {
 enum Action {
   None,
   DumpMLIRQuant,
+  DumpMLIRSCF,
   DumpMLIRSTD,
   DumpMLIRLLVM,
   DumpLLVMIR,
@@ -54,7 +55,7 @@ static llvm::cl::opt<enum Action> emitAction("emit",
     llvm::cl::values(clEnumValN(RunJIT, "jit", "JIT the code and run it by invoking the main function")));
 
 static llvm::cl::opt<bool> enableOpt("opt", llvm::cl::desc("Enable optimizations"));
-
+static llvm::cl::opt<bool> enableQOpt("qopt", llvm::cl::desc("Enable quantum optimizations"));
 
 int loadMLIR(mlir::MLIRContext &context, mlir::OwningModuleRef &module) {
     // Otherwise, the input is '.mlir'.
@@ -86,6 +87,12 @@ int loadAndProcessMLIR(mlir::MLIRContext &context, mlir::OwningModuleRef &module
 
     if (emitAction >= Action::DumpMLIRQuant)
         pm.addPass(mlir::quantum::createMemToValPass());
+    if (enableQOpt) {
+        pm.addPass(mlir::quantum::createCircuitInlinerPass());
+        pm.addPass(mlir::quantum::createQuantumGateOptimizationPass());
+    }
+    if (emitAction >= Action::DumpMLIRSCF)
+        pm.addPass(mlir::quantum::createResourceCounterPass());
     if (emitAction >= Action::DumpMLIRSTD)
         pm.addPass(mlir::createLowerToCFGPass());
     if (emitAction >= Action::DumpMLIRLLVM) {
@@ -163,6 +170,9 @@ int main(int argc, char **argv) {
     mlir::registerPass("circuit-inline",
                        "Inline circuit calls",
                        mlir::quantum::createCircuitInlinerPass);
+    mlir::registerPass("count-resources",
+                       "Count the quantum resources used in this program.",
+                       mlir::quantum::createResourceCounterPass);
 
     // Below we selectively register all dialects that might show up in the input file.
     // If blanket registration of all dialects is prefered, use this statement instead:

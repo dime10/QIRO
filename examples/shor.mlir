@@ -143,6 +143,7 @@ q.circ @addConstant(%C: i32, %r: !q.qureg<>, %n: index) {
     %c0 = constant 0 : index
     %s1 = constant 1 : index
     %c1 = constant 1 : i32
+
     // compute
     q.call @QFT(%r, %n) {compute} : !q.qureg<>, index
 
@@ -210,7 +211,7 @@ q.circ @subCmodN(%C: i32, %N: i32, %r: !q.qureg<>, %n: index) {
 q.circ @mulCmodN(%C: i32, %N: i32, %r: !q.qureg<>, %n: index) {
     %c0 = constant 0 : index
     %c1 = constant 1 : index
-    %np1 = muli %n, %c1 : index
+    %np1 = addi %n, %c1 : index
     %anc = q.allocreg(%np1) -> !q.qureg<>
     %Cinv = call @mod_inv(%C, %N) : (i32, i32) -> i32
 
@@ -248,7 +249,7 @@ q.circ @shor(%N: i32, %a: i32) {
 
     %0 = uitofp %N : i32 to f64
     %1 = log2 %0 : f64
-    %2 = ceilf %0 : f64
+    %2 = ceilf %1 : f64
     %3 = fptoui %2 : f64 to i32
     %n = index_cast %3 : i32 to index
     %n2 = muli %n, %c2 : index

@@ -4,6 +4,7 @@ add_subdirectory(utils)
 add_mlir_dialect_library(MLIRQuantumTransforms
     QuantumTransforms.cpp
     CircuitInliner.cpp
+    ResourceEstimation.cpp
 
     ADDITIONAL_HEADER_DIRS
 
