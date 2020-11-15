@@ -1,66 +1,66 @@
-func @mod(%a: i32, %N: i32) -> i32 {
-    %0 = divi_unsigned %a, %N : i32
-    %1 = muli %N, %0 : i32
-    %2 = subi %a, %1 : i32
-    return %2 : i32
+func @mod(%a: i64, %N: i64) -> i64 {
+    %0 = divi_unsigned %a, %N : i64
+    %1 = muli %N, %0 : i64
+    %2 = subi %a, %1 : i64
+    return %2 : i64
 }
 
-func @mod_exp(%b: i32, %e: i32, %N: i32) -> i32 {
-    %c0 = constant 0 : i32
-    %c1 = constant 1 : i32
-    %c2 = constant 2 : i32
-    %cond = cmpi "eq", %N, %c1 : i32
-    cond_br %cond, ^ret(%c0 : i32), ^reduce
+func @mod_exp(%b: i64, %e: i64, %N: i64) -> i64 {
+    %c0 = constant 0 : i64
+    %c1 = constant 1 : i64
+    %c2 = constant 2 : i64
+    %cond = cmpi "eq", %N, %c1 : i64
+    cond_br %cond, ^ret(%c0 : i64), ^reduce
 
     ^reduce:
-        %res = constant 1 : i32
-        %base = call @mod(%b, %N) : (i32, i32) -> i32
-        %cond2 = cmpi "ugt", %e, %c0 : i32
-        cond_br %cond2, ^while(%base, %e, %res : i32, i32, i32), ^ret(%res : i32)
+        %res = constant 1 : i64
+        %base = call @mod(%b, %N) : (i64, i64) -> i64
+        %cond2 = cmpi "ugt", %e, %c0 : i64
+        cond_br %cond2, ^while(%base, %e, %res : i64, i64, i64), ^ret(%res : i64)
 
-    ^while(%base_0: i32, %exp_0: i32, %res_0: i32):
-        %0 = call @mod(%exp_0, %c2) : (i32, i32) -> i32
-        %cond3 = cmpi "eq", %0, %c1 : i32
-        %res_1 = scf.if %cond3 -> i32 {
-            %1 = muli %res_0, %base_0 : i32
-            %2 = call @mod(%1, %N) : (i32, i32) -> i32
-            scf.yield %2 : i32
+    ^while(%base_0: i64, %exp_0: i64, %res_0: i64):
+        %0 = call @mod(%exp_0, %c2) : (i64, i64) -> i64
+        %cond3 = cmpi "eq", %0, %c1 : i64
+        %res_1 = scf.if %cond3 -> i64 {
+            %1 = muli %res_0, %base_0 : i64
+            %2 = call @mod(%1, %N) : (i64, i64) -> i64
+            scf.yield %2 : i64
         } else {
-            scf.yield %res_0 : i32
+            scf.yield %res_0 : i64
         }
 
-        %exp_1 = shift_right_unsigned %exp_0, %c1 : i32
+        %exp_1 = shift_right_unsigned %exp_0, %c1 : i64
 
-        %3 = muli %base_0, %base_0 : i32
-        %base_1 = call @mod(%3, %N) : (i32, i32) -> i32
+        %3 = muli %base_0, %base_0 : i64
+        %base_1 = call @mod(%3, %N) : (i64, i64) -> i64
 
-        %cond4 = cmpi "ugt", %exp_1, %c0 : i32
-        cond_br %cond4, ^while(%base_1, %exp_1, %res_1 : i32, i32, i32), ^ret(%res_1 : i32)
+        %cond4 = cmpi "ugt", %exp_1, %c0 : i64
+        cond_br %cond4, ^while(%base_1, %exp_1, %res_1 : i64, i64, i64), ^ret(%res_1 : i64)
 
-    ^ret(%r: i32):
-        return %r : i32
+    ^ret(%r: i64):
+        return %r : i64
 }
 
-func @mod_inv(%C: i32, %N: i32) -> i32 {
-    %c0 = constant 0 : i32
-    %c1 = constant 1 : i32
-    br ^while(%N, %C, %c0, %c1 : i32, i32, i32, i32)
+func @mod_inv(%C: i64, %N: i64) -> i64 {
+    %c0 = constant 0 : i64
+    %c1 = constant 1 : i64
+    br ^while(%N, %C, %c0, %c1 : i64, i64, i64, i64)
 
-    ^while(%r_0: i32, %old_r: i32, %s_0: i32, %old_s: i32):
-        %q = divi_unsigned %old_r, %r_0 : i32
-        %qr = muli %q, %r_0 : i32
-        %r_1 = subi %old_r, %qr : i32
+    ^while(%r_0: i64, %old_r: i64, %s_0: i64, %old_s: i64):
+        %q = divi_unsigned %old_r, %r_0 : i64
+        %qr = muli %q, %r_0 : i64
+        %r_1 = subi %old_r, %qr : i64
 
-        %qs = muli %q, %s_0 : i32
-        %s_1 = subi %old_s, %qs : i32
+        %qs = muli %q, %s_0 : i64
+        %s_1 = subi %old_s, %qs : i64
 
-        %cond = cmpi "ne", %r_1, %c0 : i32
-        cond_br %cond, ^while(%r_1, %r_0, %s_1, %s_0 : i32, i32, i32, i32), ^ret(%s_0 : i32)
+        %cond = cmpi "ne", %r_1, %c0 : i64
+        cond_br %cond, ^while(%r_1, %r_0, %s_1, %s_0 : i64, i64, i64, i64), ^ret(%s_0 : i64)
 
-    ^ret(%s: i32):
-        %0 = addi %s, %N : i32
-        %1 = call @mod(%0, %N) : (i32, i32) -> i32
-        return %1 : i32
+    ^ret(%s: i64):
+        %0 = addi %s, %N : i64
+        %1 = call @mod(%0, %N) : (i64, i64) -> i64
+        return %1 : i64
 }
 
 func @calc_qft_angle(%j: index) -> f64 {
@@ -68,8 +68,8 @@ func @calc_qft_angle(%j: index) -> f64 {
     %c1 = constant 1 : index
     %0 = addi %c1, %j : index
     %1 = shift_left %c1, %0 : index
-    %2 = index_cast %1 : index to i32
-    %3 = uitofp %2 : i32 to f64
+    %2 = index_cast %1 : index to i64
+    %3 = uitofp %2 : i64 to f64
     %4 = divf %pi, %3 : f64
     return %4 : f64
 }
@@ -79,25 +79,25 @@ func @calc_add_angle(%i: index, %j: index) -> f64 {
     %c1 = constant 1 : index
     %0 = subi %i, %j : index
     %1 = shift_left %c1, %0 : index
-    %2 = index_cast %1 : index to i32
-    %3 = uitofp %2 : i32 to f64
+    %2 = index_cast %1 : index to i64
+    %3 = uitofp %2 : i64 to f64
     %4 = divf %pi, %3 : f64
     return %4 : f64
 }
 
-func @calc_cur_a(%N: i32, %n: index, %a: i32, %i: index) -> i32 {
-    %c1 = constant 1 : i32
-    %c2 = constant 2 : i32
-    %k = index_cast %i : index to i32
-    %nbits = index_cast %n : index to i32
+func @calc_cur_a(%N: i64, %n: index, %a: i64, %i: index) -> i64 {
+    %c1 = constant 1 : i64
+    %c2 = constant 2 : i64
+    %k = index_cast %i : index to i64
+    %nbits = index_cast %n : index to i64
 
-    %0 = muli %nbits, %c2 : i32
-    %1 = subi %0, %c1 : i32
-    %2 = subi %1, %k : i32
-    %3 = shift_left %c1, %2 : i32
-    %4 = call @mod_exp(%a, %3, %N) : (i32, i32, i32) -> i32
+    %0 = muli %nbits, %c2 : i64
+    %1 = subi %0, %c1 : i64
+    %2 = subi %1, %k : i64
+    %3 = shift_left %c1, %2 : i64
+    %4 = call @mod_exp(%a, %3, %N) : (i64, i64, i64) -> i64
 
-    return %4 : i32
+    return %4 : i64
 }
 
 func @calc_shor_angle(%i: index, %j: index) -> f64 {
@@ -105,8 +105,8 @@ func @calc_shor_angle(%i: index, %j: index) -> f64 {
     %c1 = constant 1 : index
     %0 = subi %i, %j : index
     %1 = shift_left %c1, %0 : index
-    %2 = index_cast %1 : index to i32
-    %3 = uitofp %2 : i32 to f64
+    %2 = index_cast %1 : index to i64
+    %3 = uitofp %2 : i64 to f64
     %4 = divf %mpi, %3 : f64
     return %4 : f64
 }
@@ -139,10 +139,10 @@ q.circ @QFT(%r: !q.qureg<>, %n : index) attributes {no_inline} {
 }
 
 // add a positive or negative constant to register of size n
-q.circ @addConstant(%C: i32, %r: !q.qureg<>, %n: index) {
+q.circ @addConstant(%C: i64, %r: !q.qureg<>, %n: index) {
     %c0 = constant 0 : index
     %s1 = constant 1 : index
-    %c1 = constant 1 : i32
+    %c1 = constant 1 : i64
 
     // compute
     q.call @QFT(%r, %n) {compute} : !q.qureg<>, index
@@ -151,10 +151,10 @@ q.circ @addConstant(%C: i32, %r: !q.qureg<>, %n: index) {
         %ip1 = addi %i, %s1 : index
         scf.for %j = %c0 to %ip1 step %s1 {
             %k = subi %i, %j : index
-            %0 = index_cast %k : index to i32
-            %1 = shift_right_signed %C, %0 : i32
-            %2 = and %1, %c1 : i32
-            %cond = cmpi "eq", %2, %c1 : i32
+            %0 = index_cast %k : index to i64
+            %1 = shift_right_signed %C, %0 : i64
+            %2 = and %1, %c1 : i64
+            %cond = cmpi "eq", %2, %c1 : i64
             scf.if %cond {
                 %phi = call @calc_add_angle(%i, %k) : (index, index) -> f64
                 q.R(%phi: f64) %r[%i] : !q.qureg<>
@@ -169,28 +169,28 @@ q.circ @addConstant(%C: i32, %r: !q.qureg<>, %n: index) {
 }
 
 // substract a constant from register of size n
-q.circ @subConstant(%C: i32, %r: !q.qureg<>, %n: index) {
-    %cm1 = constant -1 : i32
-    %mC = muli %C, %cm1 : i32
-    q.call @addConstant(%mC, %r, %n) : i32, !q.qureg<>, index
+q.circ @subConstant(%C: i64, %r: !q.qureg<>, %n: index) {
+    %cm1 = constant -1 : i64
+    %mC = muli %C, %cm1 : i64
+    q.call @addConstant(%mC, %r, %n) : i64, !q.qureg<>, index
 }
 
 // add a positive constant to register modulo N
-q.circ @addCmodN(%C: i32, %N: i32, %r: !q.qureg<>, %n: index) {
+q.circ @addCmodN(%C: i64, %N: i64, %r: !q.qureg<>, %n: index) {
     %c1 = constant 1 : index
     %nm1 = subi %n, %c1 : index
 
-    q.call @addConstant(%C, %r, %n) : i32, !q.qureg<>, index
+    q.call @addConstant(%C, %r, %n) : i64, !q.qureg<>, index
 
     // compute
-    q.call @subConstant(%N, %r, %n) {compute} : i32, !q.qureg<>, index
+    q.call @subConstant(%N, %r, %n) {compute} : i64, !q.qureg<>, index
     %anc = q.alloc -> !q.qubit
     q.CX %r[%nm1], %anc {compute} : !q.qureg<>, !q.qubit
     %addOp = q.getval @addConstant -> !q.circ
     %ctrlAdd = q.ctrl %addOp, %anc : !q.circ, !q.qubit -> !q.cop<1, !q.circ>
-    q.apply %ctrlAdd(%N, %r, %n) {compute} : !q.cop<1, !q.circ>(i32, !q.qureg<>, index)
+    q.apply %ctrlAdd(%N, %r, %n) {compute} : !q.cop<1, !q.circ>(i64, !q.qureg<>, index)
 
-    q.call @subConstant(%C, %r, %n) : i32, !q.qureg<>, index
+    q.call @subConstant(%C, %r, %n) : i64, !q.qureg<>, index
 
     // uncompute
     q.X %r[%nm1] {uncompute} : !q.qureg<>
@@ -198,31 +198,31 @@ q.circ @addCmodN(%C: i32, %N: i32, %r: !q.qureg<>, %n: index) {
     q.X %r[%nm1] {uncompute} : !q.qureg<>
     q.free %anc : !q.qubit
 
-    q.call @addConstant(%C, %r, %n) : i32, !q.qureg<>, index
+    q.call @addConstant(%C, %r, %n) : i64, !q.qureg<>, index
 }
 
 // subtract a positive constant to register modulo N
-q.circ @subCmodN(%C: i32, %N: i32, %r: !q.qureg<>, %n: index) {
-    %NmC = subi %N, %C : i32
-    q.call @addCmodN(%NmC, %N, %r, %n) : i32, i32, !q.qureg<>, index
+q.circ @subCmodN(%C: i64, %N: i64, %r: !q.qureg<>, %n: index) {
+    %NmC = subi %N, %C : i64
+    q.call @addCmodN(%NmC, %N, %r, %n) : i64, i64, !q.qureg<>, index
 }
 
 // multiply a positive constant by a register modulo N, need gcd(C, N) = 1
-q.circ @mulCmodN(%C: i32, %N: i32, %r: !q.qureg<>, %n: index) {
+q.circ @mulCmodN(%C: i64, %N: i64, %r: !q.qureg<>, %n: index) {
     %c0 = constant 0 : index
     %c1 = constant 1 : index
     %np1 = addi %n, %c1 : index
     %anc = q.allocreg(%np1) -> !q.qureg<>
-    %Cinv = call @mod_inv(%C, %N) : (i32, i32) -> i32
+    %Cinv = call @mod_inv(%C, %N) : (i64, i64) -> i64
 
     scf.for %i = %c0 to %n step %c1 {
         %addOp = q.getval @addCmodN -> !q.circ
         %ctrlAdd = q.ctrl %addOp, %r[%i] : !q.circ, !q.qureg<> -> !q.cop<1, !q.circ>
 
-        %0 = index_cast %i : index to i32
-        %1 = shift_left %C, %0 : i32
-        %2 = call @mod(%1, %N) : (i32, i32) -> i32
-        q.apply %ctrlAdd(%2, %N, %anc, %np1) : !q.cop<1, !q.circ>(i32, i32, !q.qureg<>, index)
+        %0 = index_cast %i : index to i64
+        %1 = shift_left %C, %0 : i64
+        %2 = call @mod(%1, %N) : (i64, i64) -> i64
+        q.apply %ctrlAdd(%2, %N, %anc, %np1) : !q.cop<1, !q.circ>(i64, i64, !q.qureg<>, index)
     }
 
     scf.for %i = %c0 to %n step %c1 {
@@ -233,25 +233,25 @@ q.circ @mulCmodN(%C: i32, %N: i32, %r: !q.qureg<>, %n: index) {
         %subOp = q.getval @subCmodN -> !q.circ
         %ctrlSub = q.ctrl %subOp, %r[%i] : !q.circ, !q.qureg<> -> !q.cop<1, !q.circ>
 
-        %3 = index_cast %i : index to i32
-        %4 = shift_left %Cinv, %3 : i32
-        %5 = call @mod(%4, %N) : (i32, i32) -> i32
-        q.apply %ctrlSub(%5, %N, %anc, %np1) : !q.cop<1, !q.circ>(i32, i32, !q.qureg<>, index)
+        %3 = index_cast %i : index to i64
+        %4 = shift_left %Cinv, %3 : i64
+        %5 = call @mod(%4, %N) : (i64, i64) -> i64
+        q.apply %ctrlSub(%5, %N, %anc, %np1) : !q.cop<1, !q.circ>(i64, i64, !q.qureg<>, index)
     }
 
     q.freereg %anc : !q.qureg<>
 }
 
-q.circ @shor(%N: i32, %a: i32) {
+q.circ @shor(%N: i64, %a: i64) attributes {no_inline_target} {
     %c0 = constant 0 : index
     %c1 = constant 1 : index
     %c2 = constant 2 : index
 
-    %0 = uitofp %N : i32 to f64
+    %0 = uitofp %N : i64 to f64
     %1 = log2 %0 : f64
     %2 = ceilf %1 : f64
-    %3 = fptoui %2 : f64 to i32
-    %n = index_cast %3 : i32 to index
+    %3 = fptoui %2 : f64 to i64
+    %n = index_cast %3 : i64 to index
     %n2 = muli %n, %c2 : index
 
     %m0 = constant 0 : i1
@@ -266,12 +266,12 @@ q.circ @shor(%N: i32, %a: i32) {
     q.X %r[0] : !q.qureg<>
 
     scf.for %i = %c0 to %n2 step %c1 {
-        %cur_a = call @calc_cur_a(%N, %n, %a, %i) : (i32, index, i32, index) -> i32
+        %cur_a = call @calc_cur_a(%N, %n, %a, %i) : (i64, index, i64, index) -> i64
 
         q.H %cqb : !q.qubit
         %mulOp = q.getval @mulCmodN -> !q.circ
         %ctrlMul = q.ctrl %mulOp, %cqb : !q.circ, !q.qubit -> !q.cop<1, !q.circ>
-        q.apply %ctrlMul(%cur_a, %N, %r, %n) : !q.cop<1, !q.circ>(i32, i32, !q.qureg<>, index)
+        q.apply %ctrlMul(%cur_a, %N, %r, %n) : !q.cop<1, !q.circ>(i64, i64, !q.qureg<>, index)
 
         scf.for %j = %c0 to %i step %c1 {
             %cond = load %meas[%j] : memref<?xi1>
@@ -296,8 +296,8 @@ q.circ @shor(%N: i32, %a: i32) {
 }
 
 q.circ @main() attributes {no_inline_target} {
-    %N = constant 15 : i32
-    %a = constant 2 : i32
+    %N = constant 15 : i64
+    %a = constant 2 : i64
 
-    q.call @shor(%N, %a) : i32, i32
+    q.call @shor(%N, %a) : i64, i64
 }
