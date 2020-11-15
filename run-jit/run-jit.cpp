@@ -55,6 +55,9 @@ static llvm::cl::opt<enum Action> emitAction("emit",
     llvm::cl::values(clEnumValN(RunJIT, "jit", "JIT the code and run it by invoking the main function")));
 
 static llvm::cl::opt<bool> enableOpt("opt", llvm::cl::desc("Enable optimizations"));
+static llvm::cl::opt<bool> lowerControls("lower", llvm::cl::desc("Lower controlled circuit calls"));
+static llvm::cl::opt<bool> enableInline("inline", llvm::cl::desc("Enable quantum circuit inlining"));
+static llvm::cl::opt<bool> stripCircuit("strip", llvm::cl::desc("Remove unused circuit definitions"));
 static llvm::cl::opt<bool> enableQOpt("qopt", llvm::cl::desc("Enable quantum optimizations"));
 
 int loadMLIR(mlir::MLIRContext &context, mlir::OwningModuleRef &module) {
@@ -87,9 +90,25 @@ int loadAndProcessMLIR(mlir::MLIRContext &context, mlir::OwningModuleRef &module
 
     if (emitAction >= Action::DumpMLIRQuant)
         pm.addPass(mlir::quantum::createMemToValPass());
-    if (enableQOpt) {
+    if (lowerControls)
+        pm.addPass(mlir::quantum::createLowerControlledCircuitsPass());
+    if (stripCircuit) {
+        pm.addPass(mlir::quantum::createStripUnusedCircuitPass());
+        pm.addPass(mlir::createCanonicalizerPass());
+        pm.addPass(mlir::quantum::createStripUnusedCircuitPass());
+    }
+    if (enableInline)
         pm.addPass(mlir::quantum::createCircuitInlinerPass());
+    if (stripCircuit) {
+        pm.addPass(mlir::quantum::createStripUnusedCircuitPass());
+        pm.addPass(mlir::createCanonicalizerPass());
+        pm.addPass(mlir::quantum::createStripUnusedCircuitPass());
+    } else {
+        pm.addPass(mlir::createCanonicalizerPass());
+    }
+    if (enableQOpt) {
         pm.addPass(mlir::quantum::createQuantumGateOptimizationPass());
+        pm.addPass(mlir::createCanonicalizerPass());
     }
     if (emitAction >= Action::DumpMLIRSCF)
         pm.addPass(mlir::quantum::createResourceCounterPass());

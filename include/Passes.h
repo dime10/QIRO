@@ -8,6 +8,8 @@ std::unique_ptr<Pass> createMemToValPass();
 std::unique_ptr<Pass> createQuantumGateOptimizationPass();
 std::unique_ptr<Pass> createCircuitInlinerPass();
 std::unique_ptr<Pass> createResourceCounterPass();
+std::unique_ptr<Pass> createStripUnusedCircuitPass();
+std::unique_ptr<Pass> createLowerControlledCircuitsPass();
 
 } // end namespace quantum
 } // end namespace mlir

@@ -1614,6 +1614,87 @@ template<class R> struct FoldRotation : public OpRewritePattern<R> {
     }
 };
 
+// two successive controlled rotation gates can be combined together if they have the same controls
+struct FoldControlledRotations : public OpRewritePattern<ControlOp> {
+    // Constructor: benefit = "how much computation" the transformation saves
+    FoldControlledRotations(MLIRContext *context) :
+        OpRewritePattern<ControlOp>(context, /*benefit=*/3) {}
+
+    // match (rz - ctrl... - rz - ctrl...) pattern
+    LogicalResult matchAndRewrite(ControlOp ctrl2, PatternRewriter &rewriter) const override {
+        // first check that we have two succesive single target control gates
+        if (ctrl2.qbs2() || !ctrl2.qbs() || !isa<ControlOp>(ctrl2.qbs().getDefiningOp()))
+            return failure();
+        ControlOp ctrl1 = cast<ControlOp>(ctrl2.qbs().getDefiningOp());
+        if (ctrl1.qbs2() || !ctrl1.qbs() || ctrl1.getParentRegion() != ctrl2.getParentRegion())
+            return failure();
+
+        // resolve and compare control chain, also needs to be successive
+        SmallVector<ControlOp, 4> ctrlsVec1, ctrlsVec2;
+        Operation *rot1 = nullptr, *rot2 = nullptr;
+        if (failed(resolveControlChain(ctrl1, rot1, ctrlsVec1)) ||
+                failed(resolveControlChain(ctrl2, rot2, ctrlsVec2)))
+            return failure();
+        if (rot1->getParentRegion() != rot2->getParentRegion())
+            return failure();
+
+        // check for now only one use on rot1
+        if (!rot1->getResult(0).hasOneUse()) {
+            llvm::errs() << "Rotation with more than one use!";
+            return failure();
+        }
+
+        // ctrl arguments to each controlOp in the second chain need to come
+        // from the corresponding op in the first chain
+        auto ctrls1It = ctrlsVec1.begin();
+        for (auto cop2 : ctrlsVec2)
+            if (cop2.qbs().getDefiningOp() != (*ctrls1It++).getOperation())
+                return failure();
+
+        // combine rotations, reuse first chain
+        Value phi1 = rot1->getOperand(0);
+        Value phi2 = rot2->getOperand(0);
+
+        rewriter.setInsertionPoint(rot1);
+        OperationState addState(rot1->getLoc(), AddFOp::getOperationName());
+        AddFOp::build(rewriter, addState, phi1, phi2);
+        Operation *addOp = rewriter.createOperation(addState);
+
+        rewriter.startRootUpdate(rot1);
+        rot1->setOperand(0, addOp->getResult(0)); // phi1 + phi2
+        rewriter.finalizeRootUpdate(rot1);
+
+        // replace all of the second chain with return values of the first
+        ctrls1It = ctrlsVec1.begin();
+        for (auto cop2 : llvm::make_early_inc_range(ctrlsVec2))
+            rewriter.replaceOp(cop2, (*ctrls1It++).getResults());
+
+        if (rot2->getResult(0).getUses().empty())
+            rewriter.eraseOp(rot2);
+
+        return success();
+    }
+
+private:
+    static LogicalResult resolveControlChain(Operation *op, Operation* &rot,
+                                             SmallVectorImpl<ControlOp> &ctrls) {
+        rot = nullptr;
+        while (!rot) {
+            if (auto ctrl = dyn_cast<ControlOp>(op)) {
+                op = ctrl.heldOp().getDefiningOp();
+                ctrls.push_back(ctrl);
+            } else if (isa<RzOp>(op)) {
+                rot = op;
+            } else if (isa<ROp>(op)) {
+                rot = op;
+            } else {
+                return failure();
+            }
+        }
+        return success();
+    }
+};
+
 // remove circuit adjoints that have no more uses
 struct FoldDanglingControl : public OpRewritePattern<ControlOp> {
     // Constructor: benefit = "how much computation" the transformation saves
@@ -1707,8 +1788,506 @@ struct QuantumGateOptimizationPass : public OperationPass<ModuleOp> {
         patterns.insert<CircuitCancelFw>(&context);
         patterns.insert<FoldRotation<RzOp>>(&context);
         patterns.insert<FoldRotation<ROp>>(&context);
+        patterns.insert<FoldControlledRotations>(&context);
 
         applyPatternsAndFoldGreedily(getOperation(), patterns);
+    }
+};
+
+struct StripUnusedCircuitPass : public OperationPass<ModuleOp> {
+    StripUnusedCircuitPass()
+        : OperationPass<ModuleOp>(TypeID::get<StripUnusedCircuitPass>()) {}
+    StripUnusedCircuitPass(const StripUnusedCircuitPass &)
+        : OperationPass<ModuleOp>(TypeID::get<StripUnusedCircuitPass>()) {}
+
+    StringRef getName() const override {
+        return "StripUnusedCircuitPass";
+    }
+
+    std::unique_ptr<Pass> clonePass() const override {
+        return std::make_unique<StripUnusedCircuitPass>(*this);
+    }
+
+    void runOnOperation() override {
+        ModuleOp module = getOperation();
+        OpBuilder b(module.getContext());
+
+        for (auto &block : module.getBodyRegion()) {
+            for (auto &op : llvm::make_early_inc_range(block)) {
+                if (auto circ = dyn_cast<CircuitOp>(op)) {
+                    if (circ.symbolKnownUseEmpty(module) && circ.getName() != "mlir_main"
+                                                         && circ.getName() != "main")
+                        circ.erase();
+                }
+            }
+        }
+
+    }
+};
+
+struct LowerControlledCircuitsPass : public OperationPass<ModuleOp> {
+    LowerControlledCircuitsPass()
+        : OperationPass<ModuleOp>(TypeID::get<LowerControlledCircuitsPass>()) {}
+    LowerControlledCircuitsPass(const LowerControlledCircuitsPass &)
+        : OperationPass<ModuleOp>(TypeID::get<LowerControlledCircuitsPass>()) {}
+
+    StringRef getName() const override {
+        return "LowerControlledCircuitsPass";
+    }
+
+    std::unique_ptr<Pass> clonePass() const override {
+        return std::make_unique<LowerControlledCircuitsPass>(*this);
+    }
+
+private:
+    std::unordered_set<std::string> alreadyTraversed;
+    Operation *main;
+    SmallVector<Value, 4> currentCtrls;
+
+    void makeControlled(OpBuilder &b, Operation* &op, Value &ctrls) {
+        assert(ctrls.getType().isa<QstateType>() || ctrls.getType().isa<RstateType>());
+
+        if (op->getAttr("compute") || op->getAttr("uncompute"))
+            return;
+
+        llvm::Optional<int> nctrls;
+        if (ctrls.getType().isa<QstateType>())
+            nctrls = 1;
+        else
+            nctrls = ctrls.getType().cast<RstateType>().getNumQubits();
+
+        // create op on hold
+        Operation *opOnHold;
+        Value qbs, qbs2(nullptr);
+        OperationState opState(op->getLoc(), op->getName());
+        b.setInsertionPoint(op);
+        if (auto h = dyn_cast<HOp>(op)) {
+            if (!h.qbs())
+                return;
+            qbs = h.qbs();
+            HOp::build(b, opState, {b.getType<U1Type>()}, {}, op->getAttrs());
+            opOnHold = b.createOperation(opState);
+        } else if (auto x = dyn_cast<XOp>(op)) {
+            if (!x.qbs())
+                return;
+            qbs = x.qbs();
+            XOp::build(b, opState, {b.getType<U1Type>()}, {}, op->getAttrs());
+            opOnHold = b.createOperation(opState);
+        } else if (auto rz = dyn_cast<RzOp>(op)) {
+            if (!rz.qbs())
+                return;
+            qbs = rz.qbs();
+            RzOp::build(b, opState, {b.getType<U1Type>()}, {rz.phi()}, op->getAttrs());
+            opOnHold = b.createOperation(opState);
+        } else if (auto r = dyn_cast<ROp>(op)) {
+            if (!r.qbs())
+                return;
+            qbs = r.qbs();
+            ROp::build(b, opState, {b.getType<U1Type>()}, {r.phi()}, op->getAttrs());
+            opOnHold = b.createOperation(opState);
+        } else if (auto cx = dyn_cast<CNotOp>(op)) {
+            if (!cx.qbs())
+                return;
+            qbs = cx.qbs();
+            qbs2 = cx.ctrl();
+            CNotOp::build(b, opState, {b.getType<U2Type>()}, {}, op->getAttrs());
+            opOnHold = b.createOperation(opState);
+            opOnHold->setAttr("operand_segment_sizes", b.getI32VectorAttr({0, 0}));
+        } else if (auto sw = dyn_cast<SwapOp>(op)) {
+            if (!sw.qbs())
+                return;
+            qbs = sw.qbs();
+            qbs2 = sw.qbs2();
+            SwapOp::build(b, opState, {b.getType<U2Type>()}, {}, op->getAttrs());
+            opOnHold = b.createOperation(opState);
+            opOnHold->setAttr("operand_segment_sizes", b.getI32VectorAttr({0, 0}));
+        } else if (auto ctrl = dyn_cast<ControlOp>(op)) {
+            if (!ctrl.qbs())
+                return;
+
+            llvm::Optional<int> newNCtrls;
+            Type baseType = ctrl.heldOp().getType();
+            if (auto ty = baseType.dyn_cast<COpType>()) {
+                newNCtrls = ty.getNumCtrls() && nctrls ? llvm::Optional<int>(*nctrls + *ty.getNumCtrls())
+                                        : llvm::None;
+                baseType = ty.getBaseType();
+            } else {
+                newNCtrls = nctrls;
+            }
+
+            COpType cType = b.getType<COpType>(newNCtrls, baseType);
+            OperationState ctrlState(op->getLoc(), ControlOp::getOperationName());
+            ControlOp::build(b, ctrlState, {ctrls.getType(), cType}, {ctrl.heldOp(), ctrls}, {});
+            Operation *ctrlOp = b.createOperation(ctrlState);
+            ctrlOp->setAttr("operand_segment_sizes", b.getI32VectorAttr({1, 1, 0, 0}));
+
+            ctrl.setOperand(0, ctrlOp->getResult(1)); // heldOp
+            // op = op;
+            ctrls = ctrlOp->getResult(0); // new_ctrls
+            return;
+        } else if (auto adj = dyn_cast<AdjointOp>(op)) {
+            if (!adj.qbs())
+                return;
+
+            llvm::Optional<int> newNCtrls;
+            Type baseType = adj.heldOp().getType();
+            if (auto ty = baseType.dyn_cast<COpType>()) {
+                newNCtrls = ty.getNumCtrls() && nctrls ? llvm::Optional<int>(*nctrls + *ty.getNumCtrls())
+                                        : llvm::None;
+                baseType = ty.getBaseType();
+            } else {
+                newNCtrls = nctrls;
+            }
+
+            COpType cType = b.getType<COpType>(newNCtrls, baseType);
+            OperationState ctrlState(op->getLoc(), ControlOp::getOperationName());
+            ControlOp::build(b, ctrlState, {ctrls.getType(), cType}, {adj.heldOp(), ctrls}, {});
+            Operation *ctrlOp = b.createOperation(ctrlState);
+            ctrlOp->setAttr("operand_segment_sizes", b.getI32VectorAttr({1, 1, 0, 0}));
+
+            adj.setOperand(0, ctrlOp->getResult(1)); // heldOp
+            // op = op;
+            ctrls = ctrlOp->getResult(0); // new_ctrls
+            return;
+        } else if (auto call = dyn_cast<CallCircOp>(op)) {
+            OperationState getvalState(op->getLoc(), CircuitValueOp::getOperationName());
+            CircuitValueOp::build(b, getvalState, b.getType<CircType>(), call.circref());
+            Operation *getvalOp = b.createOperation(getvalState);
+
+            COpType cType = b.getType<COpType>(nctrls, b.getType<CircType>());
+            OperationState ctrlState(op->getLoc(), ControlOp::getOperationName());
+            ControlOp::build(b, ctrlState, {ctrls.getType(), cType}, {getvalOp->getResult(0), ctrls}, {});
+            Operation *ctrlOp = b.createOperation(ctrlState);
+            ctrlOp->setAttr("operand_segment_sizes", b.getI32VectorAttr({1, 1, 0, 0}));
+
+            SmallVector<Value, 6> operands({ctrlOp->getResult(1)});
+            for (auto arg : call.args())
+                operands.push_back(arg);
+            OperationState applyState(op->getLoc(), ApplyCircOp::getOperationName());
+            ApplyCircOp::build(b, applyState, call.getResultTypes(), operands);
+            Operation *applyOp = b.createOperation(applyState);
+
+            call.replaceAllUsesWith(applyOp);
+            call.erase();
+            op = applyOp;
+            ctrls = ctrlOp->getResult(0);
+            return;
+        } else if (auto apply = dyn_cast<ApplyCircOp>(op)) {
+            llvm::Optional<int> newNCtrls;
+            Type baseType = apply.circval().getType();
+            if (auto ty = baseType.dyn_cast<COpType>()) {
+                newNCtrls = ty.getNumCtrls() && nctrls ? llvm::Optional<int>(*nctrls + *ty.getNumCtrls())
+                                           : llvm::None;
+                baseType = ty.getBaseType();
+            } else {
+                newNCtrls = nctrls;
+            }
+
+            COpType cType = b.getType<COpType>(newNCtrls, baseType);
+            OperationState ctrlState(op->getLoc(), ControlOp::getOperationName());
+            ControlOp::build(b, ctrlState, {ctrls.getType(), cType}, {apply.circval(), ctrls}, {});
+            Operation *ctrlOp = b.createOperation(ctrlState);
+            ctrlOp->setAttr("operand_segment_sizes", b.getI32VectorAttr({1, 1, 0, 0}));
+
+            apply.setOperand(0, ctrlOp->getResult(1));
+            // op = op;
+            ctrls = ctrlOp->getResult(0);
+            return;
+        } else if (auto m = dyn_cast<MeasurementOp>(op)) {
+            llvm_unreachable("Attempting to control non-unitary circuit!");
+        } else {
+            return;
+        }
+
+        // create applied controlled operation
+        SmallVector<Value, 4> operands({opOnHold->getResult(0), ctrls});
+        SmallVector<Type, 3> resTypes({ctrls.getType()});
+        if (qbs2) {
+            operands.push_back(qbs2);
+            resTypes.push_back(qbs2.getType());
+        }
+        operands.push_back(qbs);
+        resTypes.push_back(qbs.getType());
+        OperationState ctrlState(op->getLoc(), ControlOp::getOperationName());
+        ControlOp::build(b, ctrlState, resTypes, operands, op->getAttrs());
+        Operation *ctrlOp = b.createOperation(ctrlState);
+        ctrlOp->setAttr("operand_segment_sizes", b.getI32VectorAttr({1, 1, !!qbs2, 1}));
+
+        op->replaceAllUsesWith(ctrlOp->getResults().drop_front());
+        op->erase();
+        op = ctrlOp;
+        ctrls = ctrlOp->getResult(0);
+    }
+
+    Operation* resolveCall(Operation* &op, SmallVectorImpl<ControlOp> &ctrls, bool &foundAdj) {
+        Operation *circuit = nullptr;
+        while (!circuit) {
+            if (auto ctrl = dyn_cast<ControlOp>(op)) {
+                op = ctrl.heldOp().getDefiningOp();
+                ctrls.push_back(ctrl);
+                assert(ctrl.ctrls().getType().isa<QstateType>() && "Only single controls for now!");
+            } else if (auto adj = dyn_cast<AdjointOp>(op)) {
+                op = adj.heldOp().getDefiningOp();
+                foundAdj = true;
+            } else if (auto getval = dyn_cast<CircuitValueOp>(op)) {
+                circuit = SymbolTable::lookupNearestSymbolFrom(op, getval.circref());
+                assert(circuit && "Could not resolve symbol!");
+            } else {
+                llvm_unreachable("Unknown op in apply chain!");
+            }
+        }
+        return circuit;
+    }
+
+    Operation* createForOp(OpBuilder &b, scf::ForOp forOp) {
+        SmallVector<Value, 8> iterArgs;
+        for (auto arg : forOp.getIterOperands())
+            iterArgs.push_back(arg);
+        for (auto cqbs : currentCtrls)
+            iterArgs.push_back(cqbs);
+
+        b.setInsertionPoint(forOp);
+        OperationState forState(forOp.getLoc(), scf::ForOp::getOperationName());
+        scf::ForOp::build(b, forState, forOp.lowerBound(), forOp.upperBound(), forOp.step(), iterArgs);
+        Operation *newOp = b.createOperation(forState);
+
+        // add body
+        newOp->getRegion(0).takeBody(forOp.getLoopBody());
+        for (auto cqbs : currentCtrls)
+            newOp->getRegion(0).front().insertArgument(newOp->getRegion(0).getNumArguments(), cqbs.getType());
+
+        // replace values
+        forOp.replaceAllUsesWith(newOp->getResults().drop_back(currentCtrls.size()));
+        forOp.erase();
+
+        int i = 0;
+        for (auto cqbs : cast<scf::ForOp>(newOp).getRegionIterArgs().take_back(currentCtrls.size()))
+            currentCtrls[i++] = cqbs;
+        return newOp;
+    }
+
+    Operation* createIfOp(OpBuilder &b, scf::IfOp ifOp) {
+        SmallVector<Type, 8> resTypes;
+        for (auto ty : ifOp.getResultTypes())
+            resTypes.push_back(ty);
+        for (auto cqbs : currentCtrls)
+            resTypes.push_back(cqbs.getType());
+
+        b.setInsertionPoint(ifOp);
+        OperationState ifState(ifOp.getLoc(), scf::IfOp::getOperationName());
+        scf::IfOp::build(b, ifState, resTypes, ifOp.condition());
+        Operation *newOp = b.createOperation(ifState);
+
+        // add body
+        newOp->getRegion(0).takeBody(ifOp.thenRegion());
+        newOp->getRegion(1).takeBody(ifOp.elseRegion());
+
+        // replace values
+        ifOp.replaceAllUsesWith(newOp->getResults().drop_back(currentCtrls.size()));
+        ifOp.erase();
+
+        return newOp;
+    }
+
+    void updateTerminator(OpBuilder &b, Operation *term) {
+        SmallVector<Value, 8> retVals(term->getOperands());
+        for (auto cqbs : currentCtrls)
+            retVals.push_back(cqbs);
+        b.setInsertionPoint(term);
+        OperationState termState(term->getLoc(), scf::YieldOp::getOperationName());
+        scf::YieldOp::build(b, termState, retVals);
+        b.createOperation(termState);
+        term->erase();
+    }
+
+    bool willUseControls(Operation *op) {
+        for (auto &region : op->getRegions()) {
+            for (auto &block : region) {
+                for (auto &nestedOp : llvm::make_early_inc_range(block)) {
+                    if (isa<scf::ForOp>(nestedOp)) {
+                        if (willUseControls(&nestedOp))
+                            return true;
+                    } else if (isa<scf::IfOp>(nestedOp)) {
+                        if (willUseControls(&nestedOp))
+                            return true;
+                    } else if (isa<HOp>(nestedOp) || isa<XOp>(nestedOp) || isa<RzOp>(nestedOp) ||
+                            isa<ROp>(nestedOp) || isa<CNotOp>(nestedOp) || isa<SwapOp>(nestedOp) ||
+                            isa<ControlOp>(nestedOp) || isa<AdjointOp>(nestedOp) ||
+                            isa<CallCircOp>(nestedOp) || isa<ApplyCircOp>(nestedOp)) {
+                        if (!nestedOp.getAttr("compute") && !nestedOp.getAttr("uncompute"))
+                            return true;
+                    }
+                }
+            }
+        }
+        return false;
+    }
+
+    void propControls(OpBuilder &b, Operation *op) {
+        // also need to setup control arguments/returns for if and for operations
+        for (auto &region : op->getRegions()) {
+            SmallVector<Value, 4> tmp = currentCtrls;
+            for (auto &block : region) {
+                for (auto &nestedOp : llvm::make_early_inc_range(block)) {
+                    if (auto forOp = dyn_cast<scf::ForOp>(nestedOp)) { // control args fully local
+                        if (willUseControls(forOp)) {
+                            forOp = cast<scf::ForOp>(createForOp(b, forOp));
+                            propControls(b, forOp);
+                            updateTerminator(b, forOp.getBody()->getTerminator());
+                            currentCtrls = forOp.getResults().take_back(currentCtrls.size());
+                        }
+                    } else if (auto ifOp = dyn_cast<scf::IfOp>(nestedOp)) { // control args not local but need to reset between regions
+                        if (willUseControls(ifOp)) {
+                            ifOp = cast<scf::IfOp>(createIfOp(b, ifOp));
+                            propControls(b, ifOp);
+                            currentCtrls = ifOp.getResults().take_back(currentCtrls.size());
+                        }
+                    } else {
+                        Operation *currOp = &nestedOp;
+                        for (size_t i = 0; i < currentCtrls.size(); i++)
+                            makeControlled(b, currOp, currentCtrls[i]); // currOp/currCtrls will be updated here
+                    }
+                }
+            }
+            if (isa<scf::IfOp>(op)) {
+                updateTerminator(b, region.back().getTerminator());
+                currentCtrls = tmp;
+            }
+        }
+    }
+
+    Operation* createControlledCircuit(OpBuilder &b, Operation *circ, ApplyCircOp call,
+                                       SmallVectorImpl<ControlOp> &ctrlsVec, Operation *valOp) {
+        // copy circuit with new name to which controls will be propagated
+        StringAttr circName = circ->getAttrOfType<StringAttr>(SymbolTable::getSymbolAttrName());
+        std::string newCircName = llvm::join<ArrayRef<StringRef>>(
+            {circName.getValue(), std::to_string(ctrlsVec.size())}, "_lc");
+        Operation *newCirc = SymbolTable::lookupNearestSymbolFrom(call, newCircName);
+        if (newCirc) {
+            auto ftypeIt = cast<CircuitOp>(newCirc).getType().getInputs().take_back(ctrlsVec.size()).begin();
+            for (auto ctrl : ctrlsVec)
+                assert(ctrl.ctrls().getType() == *ftypeIt++ && "Different types in matched circuit!");
+        }
+
+        // if it doesn't already exist, we create it
+        if (!newCirc) {
+            newCirc = circ->clone();
+            CircuitOp newCircOp = cast<CircuitOp>(newCirc);
+            newCircOp.setAttr(SymbolTable::getSymbolAttrName(), b.getStringAttr(newCircName));
+            auto arrayIn = cast<CircuitOp>(circ).getType().getInputs();
+            auto arrayRe = cast<CircuitOp>(circ).getType().getResults();
+            SmallVector<Type, 8> argTypes(arrayIn.begin(), arrayIn.end());
+            SmallVector<Type, 8> resTypes(arrayRe.begin(), arrayRe.end());
+            for (auto ctrl : ctrlsVec) {
+                argTypes.push_back(ctrl.ctrls().getType());
+                resTypes.push_back(ctrl.ctrls().getType());
+                newCircOp.front().insertArgument(newCircOp.front().getNumArguments(),
+                    ctrl.ctrls().getType());
+            }
+            newCircOp.setType(b.getFunctionType(argTypes, resTypes));
+            currentCtrls.clear();
+            for (auto cqbs : newCircOp.getArguments().take_back(ctrlsVec.size()))
+                currentCtrls.push_back(cqbs);
+            b.setInsertionPointAfter(circ);
+            b.insert(newCirc);
+
+            // propagate controls TODO
+            propControls(b, newCirc);
+
+            // update return op
+            Operation *term = newCircOp.back().getTerminator();
+            assert(isa<ReturnStateOp>(term) && "Not a return op!");
+            for (auto cqbs : currentCtrls)
+                term->insertOperands(term->getNumOperands(), cqbs);
+        }
+
+        // replace call to point to new circuit
+        SmallVector<Value, 8> operands(call.getOperands().drop_front());
+        SmallVector<Type, 8> resTypes(call.getResultTypes().begin(), call.getResultTypes().end());
+        for (auto ctrl : ctrlsVec) {
+            operands.push_back(ctrl.ctrls());
+            resTypes.push_back(ctrl.ctrls().getType());
+        }
+        b.setInsertionPoint(call);
+        OperationState callState(call.getLoc(), CallCircOp::getOperationName());
+        CallCircOp::build(b, callState, resTypes, newCircName, operands);
+        Operation *newCallOp = b.createOperation(callState);
+        call.replaceAllUsesWith(newCallOp->getResults().drop_back(ctrlsVec.size()));
+        call.erase();
+
+        // erase control ops and replace their returned ctrl states
+        auto newCtrlsIt = newCallOp->getResults().take_back(ctrlsVec.size()).begin();
+        for (auto ctrl : ctrlsVec) {
+            ctrl.new_ctrls().replaceAllUsesWith(*newCtrlsIt++);
+            ctrl.erase();
+        }
+
+        // (sketch) need to be careful that we are not moving the call past uses of the values it defines
+        //assert(ctrlsVec.size() == 1 && "Only handle size 1 chains right now!");
+        Operation *comb = nullptr;
+        for (auto res : newCallOp->getResults()) {
+            if (res.getType().isa<QstateType>()) {
+                for(auto user : res.getUsers()) {
+                    if (isa<CombineStatOp>(user) || isa<CombineDynOp>(user)) {
+                        assert(!comb && "Multiple combines of the same value!");
+                        comb = user;
+                    }
+                }
+            }
+        }
+        if (comb)
+            comb->moveAfter(newCallOp);
+
+        assert(isa<CircuitValueOp>(valOp) && "Not a circuit value op!");
+        if (valOp->getResult(0).getUses().empty())
+            valOp->erase();
+
+        assert(newCirc && "Did not obtain controlled circuit!");
+        return newCirc;
+    }
+
+    void walkCallTree(OpBuilder &b, Operation *op) {
+        if (auto circ = dyn_cast<CircuitOp>(op))
+            if (alreadyTraversed.count(circ.getName().str()))
+                return;
+
+        for (auto &region : op->getRegions()) {
+            for (auto &block : region) {
+                for (auto &nestedOp : llvm::make_early_inc_range(block)) {
+                    if (auto call = dyn_cast<CallCircOp>(nestedOp)) {
+                        Operation *calledCirc = SymbolTable::lookupNearestSymbolFrom(
+                            call, call.circref());
+                        assert(calledCirc && "Unresolved direct circuit call!");
+                        walkCallTree(b, calledCirc);
+                    } else if (auto apply = dyn_cast<ApplyCircOp>(nestedOp)) {
+                        Operation *valOp = apply.circval().getDefiningOp(); // will be updated to CircValOp by resolveCall
+                        SmallVector<ControlOp, 4> ctrlsVec;
+                        bool foundAdj = false;
+                        Operation *calledCirc = resolveCall(valOp, ctrlsVec, foundAdj);
+                        assert(calledCirc && "Unresolved indirect circuit call!");
+                        if (ctrlsVec.size() && !foundAdj)
+                            walkCallTree(b, createControlledCircuit(b, calledCirc, apply, ctrlsVec, valOp));
+                        else
+                            walkCallTree(b, calledCirc);
+                    } else if (isa<scf::ForOp>(nestedOp) || isa<scf::IfOp>(nestedOp)) {
+                        walkCallTree(b, &nestedOp);
+                    }
+                }
+            }
+        }
+
+        if (auto circ = dyn_cast<CircuitOp>(op))
+            alreadyTraversed.insert(circ.getName().str());
+    }
+
+public:
+    void runOnOperation() override {
+        ModuleOp module = getOperation();
+        OpBuilder b(module.getContext());
+
+        main = module.lookupSymbol("mlir_main");
+        assert(main && "Need circuit entry point!");
+        walkCallTree(b, main);
     }
 };
 } // end namespace
@@ -1720,6 +2299,14 @@ std::unique_ptr<Pass> quantum::createMemToValPass() {
 
 std::unique_ptr<Pass> quantum::createQuantumGateOptimizationPass() {
     return std::make_unique<QuantumGateOptimizationPass>();
+}
+
+std::unique_ptr<Pass> quantum::createStripUnusedCircuitPass() {
+    return std::make_unique<StripUnusedCircuitPass>();
+}
+
+std::unique_ptr<Pass> quantum::createLowerControlledCircuitsPass() {
+    return std::make_unique<LowerControlledCircuitsPass>();
 }
 
 // Register all patterns for rewrite by the Canonicalization framework

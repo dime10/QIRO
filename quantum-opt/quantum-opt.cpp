@@ -34,6 +34,12 @@ int main(int argc, char **argv) {
     mlir::registerPass("count-resources",
                        "Count the quantum resources used in this program.",
                        mlir::quantum::createResourceCounterPass);
+    mlir::registerPass("strip-circ",
+                       "Removed unused circuit definitions.",
+                       mlir::quantum::createStripUnusedCircuitPass);
+    mlir::registerPass("lower-ctrl",
+                       "Lower controlled circuit calls.",
+                       mlir::quantum::createLowerControlledCircuitsPass);
 
     // Below we selectively register all dialects that might show up in the input file.
     // If blanket registration of all dialects is prefered, use this statement instead:
