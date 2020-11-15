@@ -25,6 +25,7 @@
 #include "llvm/Support/raw_ostream.h"
 
 #include "mlir/Dialect/Affine/IR/AffineOps.h"
+#include "mlir/Dialect/SCF/SCF.h"
 #include "QuantumDialect.h"
 #include "QuantumSSADialect.h"
 
@@ -83,6 +84,15 @@ static bool isRegionLegalToInline(InlinerInterface &interface, Region *insertReg
     return true;
   // SCF have no inlining restrictions
 
+  // also check parent circuit region if any
+  if (auto circ = insertRegion->getParentOfType<quantum::CircuitOp>()) {
+    if (!interface.isLegalToInline(&circ.getRegion(), src, valueMapping))
+      return false;
+  } else if (auto circ = insertRegion->getParentOfType<quantumssa::CircuitOp>()) {
+    if (!interface.isLegalToInline(&circ.getRegion(), src, valueMapping))
+      return false;
+  }
+
   // refer to interface for all other cases
   return interface.isLegalToInline(insertRegion, src, valueMapping);
 }
@@ -111,6 +121,21 @@ static bool isLegalToInline(InlinerInterface &interface, Region *src,
     }
   }
   return true;
+}
+
+static void propComputeTags(Builder &b, const llvm::iterator_range<mlir::Region::iterator> &blocks,
+                            bool comp, bool uncomp) {
+  for (auto &block : blocks) {
+    for (auto &op : block) {
+      if (isa<mlir::scf::ForOp>(op) || isa<mlir::scf::IfOp>(op))
+        for (auto &region : op.getRegions())
+          propComputeTags(b, region.getBlocks(), comp, uncomp);
+      if (comp)
+        op.setAttr("compute", b.getUnitAttr());
+      if (uncomp)
+        op.setAttr("uncompute", b.getUnitAttr());
+    }
+  }
 }
 
 //===----------------------------------------------------------------------===//
@@ -164,6 +189,10 @@ LogicalResult mlir::quantum::inlineRegion(InlinerInterface &interface, Region *s
   auto newBlocks = llvm::make_range(std::next(insertBlock->getIterator()),
                                     postInsertBlock->getIterator());
   Block *firstNewBlock = &*newBlocks.begin();
+
+  // propagate compute uncompute tags
+  Builder b(inlinePoint->getContext());
+  propComputeTags(b, newBlocks, !!inlinePoint->getAttr("compute"), !!inlinePoint->getAttr("uncompute"));
 
   // Remap the locations of the inlined operations if a valid source location
   // was provided.
