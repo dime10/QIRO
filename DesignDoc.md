@@ -1,8 +1,9 @@
 ## Document high-level design decisions here.
-(The chosen design option is highlighted.)\
-**Work in progress, very rough!**
+(The chosen design option is highlighted.)
 
-&nbsp;
+> **Note**
+> Work in progress, very rough!
+
 
 ## Handling of quantum meta operations
 ### Option 1: Attributes
