@@ -242,7 +242,8 @@ def ExtractOp : QuantumSSA_Op<"extract", [NoSideEffect]> {
 
             // bounds checking (if possible)
             if(this->const_idx()) {
-                for (auto idxAttr : *this->const_idx()) {
+                auto idxs = *this->const_idx();
+                for (auto idxAttr : idxs) {
                     int64_t idx = idxAttr.dyn_cast<IntegerAttr>().getInt();
                     if (idx >= regsize)
                         return this->emitOpError() << "detected index value out of bounds, idx: "
@@ -997,7 +998,7 @@ def ApplyCircOp : QuantumSSA_Op<"apply"> {
     }];
 
     let extraClassDeclaration = [{
-        static TypeRange filterRegSize(TypeRange types, MLIRContext *ctx) {
+        static llvm::SmallVector<Type, 8> filterRegSize(TypeRange types, MLIRContext *ctx) {
             Type rstate = RstateType::get(ctx, llvm::None);
             llvm::SmallVector<Type, 8> filteredTypes;
             filteredTypes.reserve(types.size());
