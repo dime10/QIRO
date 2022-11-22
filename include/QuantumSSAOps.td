@@ -242,7 +242,8 @@ def ExtractOp : QuantumSSA_Op<"extract", [NoSideEffect]> {
 
             // bounds checking (if possible)
             if(this->const_idx()) {
-                for (auto idxAttr : *this->const_idx()) {
+                auto idxs = *this->const_idx();
+                for (auto idxAttr : idxs) {
                     int64_t idx = idxAttr.dyn_cast<IntegerAttr>().getInt();
                     if (idx >= regsize)
                         return this->emitOpError() << "detected index value out of bounds, idx: "
