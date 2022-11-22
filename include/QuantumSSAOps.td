@@ -997,7 +997,7 @@ def ApplyCircOp : QuantumSSA_Op<"apply"> {
     }];
 
     let extraClassDeclaration = [{
-        static TypeRange filterRegSize(TypeRange types, MLIRContext *ctx) {
+        static llvm::SmallVector<Type, 8> filterRegSize(TypeRange types, MLIRContext *ctx) {
             Type rstate = RstateType::get(ctx, llvm::None);
             llvm::SmallVector<Type, 8> filteredTypes;
             filteredTypes.reserve(types.size());
